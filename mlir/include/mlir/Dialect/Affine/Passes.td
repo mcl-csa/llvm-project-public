@@ -59,6 +59,8 @@ def AffineLoopTiling : FunctionPass<"affine-loop-tile"> {
            "Separate full and partial tiles">,
     Option<"tileSize", "tile-size", "unsigned", /*default=*/"",
            "Use this tile size for all loops">,
+    Option<"tilingLevels", "num-tiling-levels", "unsigned", /*default=*/"",
+           "The number of times to tile a loop nest">,
     ListOption<"tileSizes", "tile-sizes", "unsigned",
                "List of tile sizes for each perfect nest "
                "(overridden by -tile-size)",

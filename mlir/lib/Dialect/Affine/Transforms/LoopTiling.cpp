@@ -39,11 +39,14 @@ struct LoopTiling : public AffineLoopTilingBase<LoopTiling> {
   }
 
   void runOnFunction() override;
-  void getTileSizes(ArrayRef<AffineForOp> band,
+  void getTileSizes(ArrayRef<AffineForOp> band, unsigned tilingLevelIndex,
                     SmallVectorImpl<unsigned> *tileSizes);
 
-  // Default tile size if nothing is provided.
+  /// Default tile size if nothing is provided.
   constexpr static unsigned kDefaultTileSize = 4;
+
+  /// Default tiling levels if nothing is provided.
+  constexpr static unsigned kDefaultNumTilingLevels = 1;
 
   // If true, tile sizes are set to avoid max/min in bounds if possible.
   bool avoidMaxMinBounds = true;
@@ -84,17 +87,22 @@ static void adjustToDivisorsOfTripCounts(ArrayRef<AffineForOp> band,
 // Returns tile sizes to use. Checks CL options; if none are specified, sets it
 // based on a simple model that looks at the memory footprint and determines
 // tile sizes assuming identity accesses / 1:1 tile size proportional footprint
-// along each of the dimensions being tiled.
+// along each of the dimensions being tiled. Second argument `curTilingLevel`[0,
+// numTilingLevels - 1] represents the tiling level for which this method is called.
 // TODO: evolve this model. Tile size determination is a large area
 // to play with in general.
 void LoopTiling::getTileSizes(ArrayRef<AffineForOp> band,
+                              unsigned tilingLevelIndex,
                               SmallVectorImpl<unsigned> *tileSizes) {
   if (band.empty())
     return;
 
-  // Use command-line tileSize for all loops if specified.
+  // Use command-line tileSize if specified. The tile size for each level is scaled down
+  // by a factor equal to the tile size of the previous level.
   if (tileSize) {
-    tileSizes->assign(band.size(), tileSize);
+    tileSizes->assign(
+        band.size(),
+        std::max(1U, static_cast<unsigned>(tileSize / (tilingLevelIndex + 1))));
     return;
   }
 
@@ -102,6 +110,10 @@ void LoopTiling::getTileSizes(ArrayRef<AffineForOp> band,
   if (!this->tileSizes.empty()) {
     tileSizes->assign(this->tileSizes.begin(), this->tileSizes.end());
     tileSizes->resize(band.size(), kDefaultTileSize);
+    // Divide the tile sizes with the tiling level to make them different.
+    for (unsigned i = 0, e = tileSizes->size(); i < e; ++i)
+      (*tileSizes)[i] =
+          std::max(1U, static_cast<unsigned>((*tileSizes)[i] / (tilingLevelIndex + 1)));
     return;
   }
   tileSizes->resize(band.size());
@@ -119,8 +131,7 @@ void LoopTiling::getTileSizes(ArrayRef<AffineForOp> band,
     // Fill with default tile sizes if footprint is unknown.
     std::fill(tileSizes->begin(), tileSizes->end(),
               LoopTiling::kDefaultTileSize);
-    if (avoidMaxMinBounds)
-      adjustToDivisorsOfTripCounts(band, tileSizes);
+    adjustToDivisorsOfTripCounts(band, tileSizes);
     LLVM_DEBUG(
         rootForOp.emitWarning("memory footprint unknown: using default tile "
                               "sizes adjusted to trip count divisors"));
@@ -165,30 +176,49 @@ void LoopTiling::runOnFunction() {
   std::vector<SmallVector<AffineForOp, 6>> bands;
   getTileableBands(getFunction(), &bands);
 
+  // Number of times to tile a band.
+  unsigned numTilingLevels;
+  numTilingLevels =
+      tilingLevels ? tilingLevels : LoopTiling::kDefaultNumTilingLevels;
+
   // Tile each band.
   for (auto &band : bands) {
-    // Set up tile sizes; fill missing tile sizes at the end with default tile
-    // size or tileSize if one was provided.
-    SmallVector<unsigned, 6> tileSizes;
-    getTileSizes(band, &tileSizes);
-    if (llvm::DebugFlag) {
-      auto diag = band[0].emitRemark("using tile sizes [");
-      for (unsigned tSize : tileSizes)
-        diag << tSize << ' ';
-      diag << "]\n";
-    }
+    unsigned bandSize = band.size();
+    AffineForOp rootForOp = band[0];
     SmallVector<AffineForOp, 6> tiledNest;
-    if (failed(tilePerfectlyNested(band, tileSizes, &tiledNest,
-                                   this->hasToDoRelativeIndexing)))
-      return signalPassFailure();
-
-    // Separate full and partial tiles.
-    if (separate) {
-      auto intraTileLoops =
-          MutableArrayRef<AffineForOp>(tiledNest).drop_front(band.size());
-      (void)separateFullTiles(intraTileLoops);
+    // Tile the band `numTilingLevels` times.
+    for (unsigned curTilingLevel = 0; curTilingLevel < numTilingLevels;
+         ++curTilingLevel) {
+      // Set up tile sizes; fill missing tile sizes at the end with default tile
+      // size or tileSize if one was provided.
+      SmallVector<unsigned, 6> tileSizes;
+      getTileSizes(band, curTilingLevel, &tileSizes);
+      if (llvm::DebugFlag) {
+        auto diag = rootForOp.emitRemark("using tile sizes [");
+        for (unsigned tSize : tileSizes)
+          diag << tSize << ' ';
+        diag << "] for tiling level " << curTilingLevel << "\n";
+      }
+      // If not the first level of tiling then take out the loops to tile next
+      // form the already tiled loop nest.
+      if (curTilingLevel != 0) {
+        band.clear();
+        band.insert(band.begin(), tiledNest.begin() + bandSize,
+                    tiledNest.end());
+      }
+      if (failed(tilePerfectlyNested(band, tileSizes, &tiledNest,
+                               this->hasToDoRelativeIndexing)))
+        return signalPassFailure();
+      // Separate full and partial tiles. Separation only supported at the last
+      // level of tiling.
+      if (separate && (curTilingLevel == numTilingLevels - 1)) {
+        auto intraTileLoops =
+            MutableArrayRef<AffineForOp>(tiledNest).drop_front(band.size());
+        (void)separateFullTiles(intraTileLoops);
+      }
     }
   }
 }
 
 constexpr unsigned LoopTiling::kDefaultTileSize;
+constexpr unsigned LoopTiling::kDefaultNumTilingLevels;

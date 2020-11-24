@@ -1,4 +1,5 @@
 // RUN: mlir-opt %s -split-input-file -affine-loop-tile="tile-size=32" | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -affine-loop-tile="tile-size=32 num-tiling-levels=2" | FileCheck --check-prefix=TWO-LEVEL %s
 // RUN: mlir-opt %s -split-input-file -affine-loop-tile="cache-size=512" | FileCheck %s --check-prefix=MODEL
 // RUN: mlir-opt %s -split-input-file -affine-loop-tile="tile-size=32 separate" | FileCheck %s --check-prefix=SEPARATE
 // RUN: mlir-opt %s -split-input-file -affine-loop-tile="tile-size=32 relative-indexing=1" | FileCheck %s --check-prefix=RELATIVE
@@ -270,6 +271,8 @@ func @separate_full_tile_2d(%M : index, %N : index) {
 
 // -----
 
+// To make sure SEPARATE-DAGs further below do not match with something above.
+// TWO-LEVEL-LABEL: func @separate_full_tile_1d_max_min
 func @separate_full_tile_1d_max_min(%M : index, %N : index, %P : index, %Q : index) {
   affine.for %i0 = max affine_map<(d0, d1) -> (d0, d1)>  (%M, %N) to min affine_map< (d0, d1) -> (d0, d1)> (%P, %Q) {
   }
@@ -290,6 +293,195 @@ func @separate_full_tile_1d_max_min(%M : index, %N : index, %P : index, %Q : ind
 // SEPARATE-NEXT:        }
 // SEPARATE-NEXT:      }
 // SEPARATE-NEXT:    }
+// TWO-LEVEL:           return
+
+// -----
+// Test cases for multi-level tiling.
+// TWO-LEVEL-DAG: [[$UB1:#map[0-9]+]] = affine_map<(d0) -> (d0 + 32)>
+// TWO-LEVEL-DAG: [[$UB2:#map[0-9]+]] = affine_map<(d0) -> (d0 + 16)>
+// TWO-LEVEL-DAG: [[$UB1_MIN:#map[0-9]+]] = affine_map<(d0) -> (d0 + 32, 50)>
+// TWO-LEVEL-DAG: [[$UB2_MIN:#map[0-9]+]] = affine_map<(d0, d1) -> (d1 + 16, d0 + 32, 50)>
+// TWO-LEVEL-DAG: [[$ID:#map[0-9]+]] = affine_map<(d0) -> (d0)>
+// TWO-LEVEL-DAG: [[$ID_PLUS_21:#map[0-9]+]] = affine_map<(d0) -> (d0 + 21)>
+// TWO-LEVEL-DAG: [[$ID_PLUS_21_16:#map[0-9]+]] = affine_map<(d0, d1) -> (d1 + 16, d0 + 21)>
+
+// TWO-LEVEL-LABEL: func @loop_tiling()
+// TWO-LEVEL-NEXT:   affine.for %{{.*}} = 0 to 256 step 32 {
+// TWO-LEVEL-NEXT:     affine.for %{{.*}} = 0 to 512 step 32 {
+// TWO-LEVEL-NEXT:       affine.for %{{.*}} = 0 to 1024 step 32 {
+// TWO-LEVEL-NEXT:         affine.for %[[I:.*]] = [[$ID]](%{{.*}}) to [[$UB1]](%{{.*}}) step 16 {
+// TWO-LEVEL-NEXT:           affine.for %[[J:.*]] = [[$ID]](%{{.*}}) to [[$UB1]](%{{.*}}) step 16 {
+// TWO-LEVEL-NEXT:             affine.for %[[K:.*]] = [[$ID]](%{{.*}}) to [[$UB1]](%{{.*}}) step 16 {
+// TWO-LEVEL-NEXT:               affine.for %[[II:.*]] = [[$ID]](%{{.*}}) to [[$UB2]](%{{.*}}) {
+// TWO-LEVEL-NEXT:                 affine.for %[[JJ:.*]] = [[$ID]](%{{.*}}) to [[$UB2]](%{{.*}}) {
+// TWO-LEVEL-NEXT:                   affine.for %[[KK:.*]] = [[$ID]](%{{.*}}) to [[$UB2]](%{{.*}}) {
+// TWO-LEVEL-NEXT:                     "test.foo"(%[[II]], %[[JJ]], %[[KK]])
+// TWO-LEVEL-NEXT:                   }
+// TWO-LEVEL-NEXT:                 }
+// TWO-LEVEL-NEXT:               }
+// TWO-LEVEL-NEXT:             }
+// TWO-LEVEL-NEXT:           }
+// TWO-LEVEL-NEXT:         }
+// TWO-LEVEL-NEXT:       }
+// TWO-LEVEL-NEXT:     }
+// TWO-LEVEL-NEXT:   }
+// TWO-LEVEL-NEXT:   affine.for %{{.*}} = 0 to 50 step 32 {
+// TWO-LEVEL-NEXT:     affine.for %[[X:.*]] = [[$ID]](%{{.*}}) to min [[$UB1_MIN]](%{{.*}}) step 16 {
+// TWO-LEVEL-NEXT:       affine.for %[[XX:.*]] = [[$ID]](%{{.*}}) to min [[$UB2_MIN]](%{{.*}}) {
+// TWO-LEVEL-NEXT:         "test.bar"(%[[XX]], %[[XX]])
+// TWO-LEVEL-NEXT:       }
+// TWO-LEVEL-NEXT:     }
+// TWO-LEVEL-NEXT:   }
+// TWO-LEVEL-NEXT: affine.for %[[I:.*]] = 0 to 21 step 32 {
+// TWO-LEVEL-NEXT:   affine.for %[[Y:.*]] = [[$ID]](%[[I]]) to [[$ID_PLUS_21]](%[[I]]) step 16 {
+// TWO-LEVEL-NEXT:     affine.for %[[Z:.*]] = [[$ID]](%[[Y]]) to min [[$ID_PLUS_21_16]](%[[I]], %[[Y]]) {
+// TWO-LEVEL-NEXT:       "test.foobar"(%[[Z]])
+// TWO-LEVEL-NEXT:     }
+// TWO-LEVEL-NEXT:   }
+// TWO-LEVEL-NEXT: }
+// TWO-LEVEL-NEXT:  return
+func @loop_tiling() {
+  affine.for %i = 0 to 256 {
+    affine.for %j = 0 to 512 {
+      affine.for %k = 0 to 1024 {
+        "test.foo"(%i, %j, %k) : (index, index, index) -> ()
+      }
+    }
+  }
+
+  affine.for %x = 0 to 50 {
+    "test.bar"(%x, %x) : (index, index) -> ()
+  }
+
+  // Intra-tile loop won't need a min expression.
+  affine.for %y = 0 to 21 {
+    "test.foobar"(%y) : (index) -> ()
+  }
+
+  return
+}
+
+// -----
+
+// TWO-LEVEL-DAG: [[$IDENTITY:#map[0-9]+]] = affine_map<(d0) -> (d0)>
+// TWO-LEVEL-DAG: [[$LB:#map[0-9]+]] = affine_map<()[s0] -> (0, s0)>
+// TWO-LEVEL-DAG: [[$UB:#map[0-9]+]] = affine_map<()[s0, s1] -> (s0, 4096 floordiv s1)>
+// TWO-LEVEL-DAG: [[$UB_INTRA_TILE1:#map[0-9]+]] = affine_map<(d0)[s0, s1] -> (d0 + 32, s0, 4096 floordiv s1)>
+// TWO-LEVEL-DAG: [[$UB_INTRA_TILE2:#map[0-9]+]] = affine_map<(d0, d1)[s0, s1] -> (d1 + 16, d0 + 32, s0, 4096 floordiv s1)>
+
+#lb = affine_map<()[s0] -> (0, s0)>
+#ub = affine_map<()[s0, s1] -> (s0, 4096 floordiv s1)>
+// TWO-LEVEL-LABEL: func @loop_max_min_bound(%{{.*}}: memref<?xi32>, %{{.*}}: index, %{{.*}}: index) {
+func @loop_max_min_bound(%A : memref<? x i32>, %L : index, %U : index) {
+  %c0 = constant 0 : index
+  %M = memref.dim %A, %c0 : memref<? x i32>
+  affine.for %i = max #lb()[%L] to min #ub()[%M, %U] {
+    addi %i, %i : index
+  }
+  return
+// TWO-LEVEL:       affine.for %{{.*}} = max [[$LB]]()[%{{.*}}] to min [[$UB]]()[%{{.*}}, %{{.*}}] step 32 {
+// TWO-LEVEL-NEXT:    affine.for %[[I:.*]] = [[$IDENTITY]](%{{.*}}) to min [[$UB_INTRA_TILE1]](%{{.*}})[%{{.*}}, %{{.*}}] step 16 {
+// TWO-LEVEL-NEXT:      affine.for %[[II:.*]] = [[$IDENTITY]](%{{.*}}) to min [[$UB_INTRA_TILE2]](%{{.*}}, %{{.*}})[%{{.*}}, %{{.*}}] {
+// TWO-LEVEL-NEXT:        addi %[[II]], %[[II]]
+// TWO-LEVEL-NEXT:      }
+// TWO-LEVEL-NEXT:    }
+// TWO-LEVEL-NEXT:  }
+}
+
+// -----
+
+// TWO-LEVEL-DAG: [[$UBMAP1:#map[0-9]+]] = affine_map<(d0)[s0] -> (d0 + 32, s0)>
+// TWO-LEVEL-DAG: [[$UBMAP2:#map[0-9]+]] = affine_map<(d0, d1)[s0] -> (d1 + 16, d0 + 32, s0)>
+func @tile_with_symbolic_loop_upper_bounds(%arg0: memref<?x?xf32>, %arg1: memref<?x?xf32>, %arg2: memref<?x?xf32>) {
+  %cst = constant 0.000000e+00 : f32
+  %c0 = constant 0 : index
+  %0 = memref.dim %arg0, %c0 : memref<?x?xf32>
+  affine.for %i0 = 0 to %0 {
+    affine.for %i1 = 0 to %0 {
+      affine.store %cst, %arg2[%i0, %i1] : memref<?x?xf32>
+      affine.for %i2 = 0 to %0 {
+        %1 = affine.load %arg0[%i0, %i2] : memref<?x?xf32>
+        %2 = affine.load %arg1[%i2, %i1] : memref<?x?xf32>
+        %3 = mulf %1, %2 : f32
+        %4 = affine.load %arg2[%i0, %i1] : memref<?x?xf32>
+        %5 = addf %4, %3 : f32
+        affine.store %5, %arg2[%i0, %i1] : memref<?x?xf32>
+      }
+    }
+  }
+  return
+}
+
+// TWO-LEVEL:       memref.dim %{{.*}}, %c0 : memref<?x?xf32>
+// TWO-LEVEL-NEXT:  affine.for %{{.*}} = 0 to %{{.*}} step 32 {
+// TWO-LEVEL-NEXT:    affine.for %{{.*}} = 0 to %{{.*}} step 32 {
+// TWO-LEVEL-NEXT:      affine.for %{{.*}} = #map0(%{{.*}}) to min [[$UBMAP1]](%{{.*}})[%{{.*}}] step 16 {
+// TWO-LEVEL-NEXT:        affine.for %{{.*}} = #map0(%{{.*}}) to min [[$UBMAP1]](%{{.*}})[%{{.*}}] step 16 {
+// TWO-LEVEL-NEXT:          affine.for %{{.*}} = #map0(%{{.*}}) to min [[$UBMAP2]](%{{.*}})[%{{.*}}] {
+// TWO-LEVEL-NEXT:            affine.for %{{.*}} = #map0(%{{.*}}) to min [[$UBMAP2]](%{{.*}})[%{{.*}}] {
+// TWO-LEVEL-NEXT:              affine.store %{{.*}}, %{{.*}}[%{{.*}}, %{{.*}}] : memref<?x?xf32>
+// TWO-LEVEL-NEXT:                affine.for %{{.*}} = 0 to %{{.*}} {
+// TWO-LEVEL-NEXT:                  affine.load
+// TWO-LEVEL-NEXT:                  affine.load
+// TWO-LEVEL-NEXT:                  mulf
+// TWO-LEVEL-NEXT:                  affine.load
+// TWO-LEVEL-NEXT:                  addf
+// TWO-LEVEL-NEXT:                  affine.store
+// TWO-LEVEL-NEXT:                }
+// TWO-LEVEL-NEXT:              }
+// TWO-LEVEL-NEXT:            }
+// TWO-LEVEL-NEXT:          }
+// TWO-LEVEL-NEXT:        }
+// TWO-LEVEL-NEXT:      }
+// TWO-LEVEL-NEXT:    }
+// TWO-LEVEL-NEXT:    return
+// TWO-LEVEL-NEXT:  }
+
+// -----
+
+// TWO-LEVEL-DAG: [[MAP0:#map[0-9]+]] = affine_map<(d0) -> (d0)>
+// TWO-LEVEL-DAG: [[MAP1:#map[0-9]+]] = affine_map<()[s0, s1] -> (s0 + s1)>
+// TWO-LEVEL-DAG: [[$UBMAP1:#map[0-9]+]] = affine_map<(d0)[s0, s1] -> (d0 + 32, s0 + s1)>
+// TWO-LEVEL-DAG: [[$UBMAP2:#map[0-9]+]] = affine_map<(d0, d1)[s0, s1] -> (d1 + 16, d0 + 32, s0 + s1)>
+func @tile_with_loop_upper_bounds_in_two_symbols(%arg0: memref<?xf32>, %limit: index) {
+  %c0 = constant 0 : index
+  %dim0 = memref.dim %arg0, %c0 : memref<?xf32>
+  affine.for %i0 = 0 to affine_map<()[s0, s1] -> (s0 + s1)> ()[%dim0, %limit] {
+    %v0 = affine.load %arg0[%i0] : memref<?xf32>
+  }
+  return
+}
+
+// TWO-LEVEL:       memref.dim %{{.*}}, %c0 : memref<?xf32>
+// TWO-LEVEL-NEXT:  affine.for %{{.*}} = 0 to [[MAP1]]()[%{{.*}}, %{{.*}}] step 32 {
+// TWO-LEVEL-NEXT:    affine.for %{{.*}} = [[MAP0]](%{{.*}}) to min [[$UBMAP1]](%{{.*}})[%{{.*}}, %{{.*}}] step 16 {
+// TWO-LEVEL-NEXT:      affine.for %{{.*}} = [[MAP0]](%{{.*}}) to min [[$UBMAP2]](%{{.*}}, {{.*}})[%{{.*}}, %{{.*}}] {
+// TWO-LEVEL-NEXT:        affine.load
+// TWO-LEVEL-NEXT:      }
+// TWO-LEVEL-NEXT:    }
+// TWO-LEVEL-NEXT:  }
+
+// -----
+
+// TWO-LEVEL-DAG: #[[$ID:.*]] = affine_map<(d0) -> (d0)>
+// TWO-LEVEL-DAG: #[[$ID_PLUS_2:.*]] = affine_map<(d0) -> (d0 + 2)>
+// TWO-LEVEL-DAG: #[[$ID_PLUS_4:.*]] = affine_map<(d0) -> (d0 + 4)>
+// TWO-LEVEL: %[[M:.*]]: index, %[[N:.*]]: index
+// TWO-LEVEL:      affine.for %[[I:.*]] = #[[$ID]](%[[M]]) to #[[$ID_PLUS_2]](%[[M]]) step 32
+// TWO-LEVEL-NEXT:   affine.for %[[J:.*]] = #[[$ID]](%[[N]]) to #[[$ID_PLUS_4]](%[[N]]) step 32
+// TWO-LEVEL-NEXT:     affine.for %[[II:.*]] = #[[$ID]](%[[I]]) to #[[$ID_PLUS_2]](%[[I]])
+// TWO-LEVEL-NEXT:       affine.for %[[JJ:.*]] = #[[$ID]](%[[J]]) to #[[$ID_PLUS_4]](%[[J]])
+// TWO-LEVEL-NEXT:         affine.for %arg6 = #[[$ID]](%[[II]]) to #[[$ID_PLUS_2]](%[[II]])
+// TWO-LEVEL-NEXT:           affine.for %arg7 = #[[$ID]](%[[JJ]]) to #[[$ID_PLUS_4]](%[[JJ]])
+// TWO-LEVEL-NEXT:             "test.foo"
+func @tile_size_larger_than_trip_count_symbolic_bound(%M: index, %N :  index) {
+  affine.for %i = affine_map<(d0) -> (d0)>(%M) to affine_map<(d0) -> (d0 + 2)>(%M) {
+    affine.for %j = affine_map<(d0) -> (d0)>(%N) to affine_map<(d0) -> (d0 + 4)>(%N) {
+      "test.foo" () : () -> ()
+    }
+  }
+  return
+}
 
 // -----
 
