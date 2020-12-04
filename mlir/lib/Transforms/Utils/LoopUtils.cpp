@@ -1135,32 +1135,37 @@ mlir::tilePerfectlyNestedParametric(MutableArrayRef<AffineForOp> input,
   return success();
 }
 
-/// Collect perfectly nested loops starting from `rootForOps`.  Loops are
+/// Collect perfectly nested loops starting from `rootLoopOp`.  Loops are
 /// perfectly nested if each loop is the first and only non-terminator operation
 /// in the parent loop.  Collect at most `maxLoops` loops and append them to
-/// `forOps`.
+/// `loopOps`.
 template <typename T>
 static void getPerfectlyNestedLoopsImpl(
-    SmallVectorImpl<T> &forOps, T rootForOp,
+    SmallVectorImpl<T> &loopOps, T rootLoopOp,
     unsigned maxLoops = std::numeric_limits<unsigned>::max()) {
   for (unsigned i = 0; i < maxLoops; ++i) {
-    forOps.push_back(rootForOp);
-    Block &body = rootForOp.region().front();
+    loopOps.push_back(rootLoopOp);
+    Block &body = rootLoopOp.region().front();
     if (body.begin() != std::prev(body.end(), 2))
       return;
 
-    rootForOp = dyn_cast<T>(&body.front());
-    if (!rootForOp)
+    rootLoopOp = dyn_cast<T>(&body.front());
+    if (!rootLoopOp)
       return;
   }
 }
 
 /// Get perfectly nested sequence of loops starting at root of loop nest
-/// (the first op being another AffineFor, and the second op - a terminator).
-/// A loop is perfectly nested iff: the first op in the loop's body is another
-/// AffineForOp, and the second op is a terminator).
+/// (the first op being another AffineFor/AffineParallel, and the second op - a
+/// terminator). A loop is perfectly nested iff: the first op in the loop's body
+/// is another AffineForOp/AffineParallelOp, and the second op is a terminator).
 void mlir::getPerfectlyNestedLoops(SmallVectorImpl<AffineForOp> &nestedLoops,
                                    AffineForOp root) {
+  getPerfectlyNestedLoopsImpl(nestedLoops, root);
+}
+
+void mlir::getPerfectlyNestedLoops(
+    SmallVectorImpl<AffineParallelOp> &nestedLoops, AffineParallelOp root) {
   getPerfectlyNestedLoopsImpl(nestedLoops, root);
 }
 
@@ -4067,4 +4072,198 @@ void mlir::splitLoop(AffineForOp forOp, std::string copyLoopAttrName,
       copyLoop.erase();
     }
   });
+}
+
+/// Collects all the affine expressions from `valueMap`, shifts the dimensions
+/// and symbols of the collected affine expressions by `dimOffset` and
+///`symOffset` respectively, and stores them into the `exprs`.
+static void getAffineExprsFromValueMap(AffineValueMap valueMap,
+                                       unsigned dimOffset, unsigned symOffset,
+                                       SmallVectorImpl<AffineExpr> &exprs) {
+
+  SmallVector<AffineExpr, 4> dimReplacements, symReplacements;
+  unsigned numDims = valueMap.getNumDims();
+  unsigned numSymbols = valueMap.getNumSymbols();
+
+  for (unsigned k = 0, f = valueMap.getNumResults(); k < f; k++) {
+    AffineExpr tmpExpr = valueMap.getResult(k);
+    // Shifting the dimensions and symbols of the affine expressions of
+    // `valueMap` by `dimOffset` and `symOffset` respectively.
+    for (unsigned kk = 0; kk < numDims; kk++)
+      dimReplacements.push_back(getAffineDimExpr(
+          dimOffset + kk, valueMap.getAffineMap().getContext()));
+
+    for (unsigned kk = 0; kk < numSymbols; kk++)
+      symReplacements.push_back(getAffineSymbolExpr(
+          symOffset + kk, valueMap.getAffineMap().getContext()));
+
+    tmpExpr = tmpExpr.replaceDimsAndSymbols(dimReplacements, symReplacements);
+
+    exprs.push_back(tmpExpr);
+
+    dimReplacements.clear();
+    symReplacements.clear();
+  }
+}
+
+/// Collects all the dimension and symbol operands seperately from `args` and
+/// stores them into `dimOperands` and `symOperands`.
+static void getDimAndSymOperands(unsigned numDims, unsigned numSymbols,
+                                 ArrayRef<Value> args,
+                                 SmallVectorImpl<Value> &dimOperands,
+                                 SmallVectorImpl<Value> &symOperands) {
+  assert(numDims + numSymbols == args.size() &&
+         "Inconsistent number of operands");
+
+  dimOperands.insert(dimOperands.end(), args.begin(), args.begin() + numDims);
+  symOperands.insert(symOperands.end(), args.begin() + numDims, args.end());
+}
+
+/// Collects all the operands of new collapsed 'affine.parallel' op from
+/// `dimOperands` and `symOperands` and stores them into the
+/// `collapseOpOperands`.
+static void getCollapseOpOperands(unsigned numDims, unsigned numSymbols,
+                                  ArrayRef<Value> dimOperands,
+                                  ArrayRef<Value> symOperands,
+                                  SmallVectorImpl<Value> &collapseOpOperands) {
+  assert(numDims == dimOperands.size() && "Inconsistent number of operands");
+  assert(numSymbols == symOperands.size() && "Inconsistent number of operands");
+
+  collapseOpOperands.assign(dimOperands.begin(), dimOperands.end());
+  collapseOpOperands.insert(collapseOpOperands.end(), symOperands.begin(),
+                            symOperands.end());
+}
+
+/// Collapses perfectly nested multi-dimensional 'affine.parallel' ops into a
+/// single n-dimensional 'affine.parallel' op.
+void mlir::collapseAffineParallelOps(FuncOp func) {
+
+  // `parallelOps` contains arrays of affine.parallel ops which are perfectly
+  // nested and can be collapsed together.
+  std::vector<SmallVector<AffineParallelOp, 4>> parallelOps;
+  SmallVector<AffineParallelOp, 4> perfectlyNestedParallelOps;
+  unsigned currMax = 1;
+
+  func.walk([&](AffineParallelOp op) {
+    // Finds the perfectly nested parallel ops considering `op` as the root
+    // parallel op.
+    getPerfectlyNestedLoops(perfectlyNestedParallelOps, op);
+
+    currMax = std::max(perfectlyNestedParallelOps.size(),
+                       (unsigned long)currMax) < currMax
+                  ? 1
+                  : perfectlyNestedParallelOps.size();
+    if (currMax == 1)
+      parallelOps.push_back(perfectlyNestedParallelOps);
+    else
+      parallelOps.back() = perfectlyNestedParallelOps;
+
+    perfectlyNestedParallelOps.clear();
+  });
+
+  // Iterating over all the arrays of perfectly nested affine.parallel ops.
+  for (unsigned i = 0, e = parallelOps.size(); i < e; i++) {
+    unsigned numParallelOps = parallelOps[i].size();
+    if (numParallelOps > 1) {
+      // Checks if the size of group of perfectly nested parallel ops is greater
+      // than one or not. The collapsing will be done only if there are 2 or
+      // more perfectly nested parallel ops which can be collapsed.
+      unsigned numLBDims, numUBDims,
+          numDimsLBCollapseOp = 0, numDimsUBCollapseOp = 0, numLBSymbols,
+          numUBSymbols, numSymbolsLBCollapseOp = 0, numSymbolsUBCollapseOp = 0;
+      AffineValueMap lbValueMap, ubValueMap;
+      SmallVector<AffineExpr, 4> collapseOpLBExprs, collapseOpUBExprs;
+      SmallVector<Value, 4> collapseOpLBOperands, collapseOpUBOperands,
+          lbDimOperands, ubDimOperands, lbSymOperands, ubSymOperands;
+      SmallVector<int64_t, 4> collapseOpSteps;
+
+      // Iterating over the affine.parallel ops which are perfectly nested and
+      // can be collapsed together.
+      for (AffineParallelOp parallelOp : parallelOps[i]) {
+        lbValueMap = parallelOp.getLowerBoundsValueMap();
+        ubValueMap = parallelOp.getUpperBoundsValueMap();
+
+        numLBDims = lbValueMap.getNumDims();
+        numUBDims = ubValueMap.getNumDims();
+        numLBSymbols = lbValueMap.getNumSymbols();
+        numUBSymbols = ubValueMap.getNumSymbols();
+
+        // Finds all the result affine expressions of lb and ub of `parallelOp`
+        // and adds them to the `collapseOpLBExprs` and `collapseOpUBExprs`.
+        getAffineExprsFromValueMap(lbValueMap, numDimsLBCollapseOp,
+                                   numSymbolsLBCollapseOp, collapseOpLBExprs);
+        getAffineExprsFromValueMap(ubValueMap, numDimsUBCollapseOp,
+                                   numSymbolsUBCollapseOp, collapseOpUBExprs);
+
+        // Adding the number of dims and symbols of lb & ub of original parallel
+        // op to the number of dims and symbols of lb & ub of new parallel op.
+        numDimsLBCollapseOp += numLBDims;
+        numSymbolsLBCollapseOp += numLBSymbols;
+        numDimsUBCollapseOp += numUBDims;
+        numSymbolsUBCollapseOp += numUBSymbols;
+
+        // Finds all the dimension and symbol operands seperately of lb & ub of
+        // `parallelOp` and adds them into the respective vectors.
+        SmallVector<Value, 4> origOpLBOperands(
+            parallelOp.getLowerBoundsOperands());
+        SmallVector<Value, 4> origOpUBOperands(
+            parallelOp.getUpperBoundsOperands());
+        getDimAndSymOperands(numLBDims, numLBSymbols, origOpLBOperands,
+                             lbDimOperands, lbSymOperands);
+        getDimAndSymOperands(numUBDims, numUBSymbols, origOpUBOperands,
+                             ubDimOperands, ubSymOperands);
+
+        // Finds the steps of `parallelOp` and adds them into the
+        // `collapseOpSteps`.
+        SmallVector<int64_t, 4> origOpSteps(parallelOp.getSteps());
+        for (unsigned k = 0, r = origOpSteps.size(); k < r; k++)
+          collapseOpSteps.push_back(origOpSteps[k]);
+      }
+
+      // Finds all the operands of new collapsed 'affin.parallel' op and stores
+      // them into the `collapseOpLBOperands` and `collapseOpUBOperands`.
+      getCollapseOpOperands(numDimsLBCollapseOp, numSymbolsLBCollapseOp,
+                            lbDimOperands, lbSymOperands, collapseOpLBOperands);
+      getCollapseOpOperands(numDimsUBCollapseOp, numSymbolsUBCollapseOp,
+                            ubDimOperands, ubSymOperands, collapseOpUBOperands);
+
+      // Creating lb and ub map of new collapsed 'affine.parallel' op.
+      AffineMap collapseOpLBMap =
+          AffineMap::get(numDimsLBCollapseOp, numSymbolsLBCollapseOp,
+                         collapseOpLBExprs, func.getContext());
+      AffineMap collapseOpUBMap =
+          AffineMap::get(numDimsUBCollapseOp, numSymbolsUBCollapseOp,
+                         collapseOpUBExprs, func.getContext());
+
+      // Building new 'affine.parallel' op which is a group of perfectly nested
+      // parallel ops.
+      OpBuilder builder(func);
+      Location loc = parallelOps[i][0].getLoc();
+      builder.clearInsertionPoint();
+      builder.setInsertionPoint(parallelOps[i][0].getOperation());
+
+      AffineParallelOp collapseParallelOp = builder.create<AffineParallelOp>(
+          loc, llvm::None, llvm::None, collapseOpLBMap, collapseOpLBOperands,
+          collapseOpUBMap, collapseOpUBOperands, collapseOpSteps);
+
+      // Moving the body of innermost `affine.parallel` op inside newly created
+      // `collapseParallelOp`.
+      Block *destBlock = collapseParallelOp.getBody();
+      Block::OpListType &srcOps =
+          parallelOps[i][numParallelOps - 1].getBody()->getOperations();
+
+      destBlock->getOperations().splice(
+          destBlock->begin(), srcOps, srcOps.begin(), std::prev(srcOps.end()));
+
+      // Replacing all the uses of induction vars of old 'affine.paralle' ops
+      // with the induction vars of newly formed `collapseParallelOp`.
+      for (unsigned r = 0; r < numParallelOps; r++)
+        replaceAllUsesInRegionWith(parallelOps[i][r].getBody()->getArgument(0),
+                                   collapseParallelOp.getBody()->getArgument(r),
+                                   collapseParallelOp.region());
+      // Erasing the outermost 'affine.parallel' op from the set of old parallel
+      // ops which are now collapsed together.
+      parallelOps[i][0].erase();
+    }
+  }
 }

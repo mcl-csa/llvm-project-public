@@ -6,6 +6,7 @@ add_mlir_library(MLIRTestTransforms
   TestGpuMatmulFastBufferPlacement.cpp
   TestGPUMatmulBarrierInsertion.cpp
   TestGpuMatmulParallelLoopMapping.cpp
+  TestCollapseAffineParallel.cpp
   TestInlining.cpp
   TestLoopFusion.cpp
   TestLoopMapping.cpp
