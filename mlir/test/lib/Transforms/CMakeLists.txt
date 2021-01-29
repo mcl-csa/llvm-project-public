@@ -2,6 +2,7 @@
 add_mlir_library(MLIRTestTransforms
   TestConstantFold.cpp
   TestConvertMatmulParallelLoopsToGPU.cpp
+  TestGpuMatmulFastBufferPlacement.cpp
   TestGpuMatmulParallelLoopMapping.cpp
   TestInlining.cpp
   TestLoopFusion.cpp

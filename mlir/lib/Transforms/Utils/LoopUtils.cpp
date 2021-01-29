@@ -21,7 +21,9 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/IR/AffineMap.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/BlockAndValueMapping.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/Support/MathExtras.h"
@@ -30,6 +32,7 @@
 #include "mlir/Transforms/Utils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/None.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/Debug.h"
@@ -2616,15 +2619,75 @@ static LogicalResult generateCopy(
   // Check if a buffer was already created.
   bool existingBuf = fastBufferMap.count(memref) > 0;
   if (!existingBuf) {
-    AffineMap fastBufferLayout = b.getMultiDimIdentityMap(rank);
+    AffineMap fastBufferLayout = copyOptions.fastBufferLayout
+                                     ? copyOptions.fastBufferLayout
+                                     : b.getMultiDimIdentityMap(rank);
     auto fastMemRefType =
         MemRefType::get(fastBufferShape, memRefType.getElementType(),
                         fastBufferLayout, copyOptions.fastMemorySpace);
 
     // Create the fast memory space buffer just before the 'affine.for'
-    // operation.
-    fastMemRef =
-        prologue.create<memref::AllocOp>(loc, fastMemRefType).getResult();
+    // operation if no fast buffer placement block is specified. If specified
+    // then creates buffer inside that block.
+    if (copyOptions.fastBufferPlacementBlock) {
+      // Special Builder to create fast memory buffers when placement block
+      // is specified.
+      OpBuilder fastBuffBuilder(copyOptions.fastBufferPlacementBlock,
+                                copyOptions.fastBufferPlacementBlock->begin());
+      if (copyOptions.useHeapAllocation)
+        fastMemRef =
+            fastBuffBuilder.create<memref::AllocOp>(loc, fastMemRefType)
+                .getResult();
+      else if (copyOptions.useGlobalAllocation) {
+        // True if global allocation has to be done. For this, first we create
+        // a global memref op and then create get global memref op that gives
+        // the global memref which can be used as a buffer. Global memref is
+        // created outside the function.
+        fastBuffBuilder.setInsertionPoint(f);
+        auto global = fastBuffBuilder.create<memref::GlobalOp>(
+            loc, fastBuffBuilder.getStringAttr(copyOptions.globalMemrefName),
+            fastBuffBuilder.getStringAttr("public"),
+            TypeAttr::get(fastMemRefType), mlir::Attribute(), mlir::UnitAttr());
+
+        fastBuffBuilder.setInsertionPoint(
+            copyOptions.fastBufferPlacementBlock,
+            copyOptions.fastBufferPlacementBlock->begin());
+        fastMemRef = fastBuffBuilder.create<memref::GetGlobalOp>(
+            loc, fastMemRefType, global.getName());
+      } else
+        // if the stack allocation has to be done.
+        fastMemRef =
+            fastBuffBuilder.create<memref::AllocaOp>(loc, fastMemRefType)
+                .getResult();
+    } else {
+      if (copyOptions.useHeapAllocation)
+        fastMemRef =
+            prologue.create<memref::AllocOp>(loc, fastMemRefType).getResult();
+      else if (copyOptions.useGlobalAllocation) {
+        // True if global allocation has to be done. For this, first we create
+        // a global memref op and then create get global memref op that gives
+        // the global memref which can be used as a buffer. Global memref is
+        // created outside the function.
+        prologue.setInsertionPoint(f);
+        auto globalMemrefOp = prologue.create<memref::GlobalOp>(
+            loc, prologue.getStringAttr(copyOptions.globalMemrefName),
+            prologue.getStringAttr("public"),
+            TypeAttr::get(fastMemRefType), /*
+             TypeAttr::get(converter.convertType(fastMemRefType)),*/
+            prologue.getZeroAttr(fastMemRefType),
+            mlir::UnitAttr::get(
+                copyOptions.fastBufferPlacementBlock->getParent()
+                    ->getContext()) /*fastBuffBuilder.getUnitAttr()*/);
+
+        prologue.setInsertionPoint(copyPlacementBlock, copyInPlacementStart);
+        fastMemRef = prologue.create<memref::GetGlobalOp>(
+            loc, fastMemRefType, globalMemrefOp.getName());
+      } else
+        // if the stack allocation has to be done.
+        fastMemRef =
+            prologue.create<memref::AllocaOp>(loc, fastMemRefType).getResult();
+    }
+
     // Record it.
     fastBufferMap[memref] = fastMemRef;
     // fastMemRefType is a constant shaped memref.
@@ -2729,8 +2792,8 @@ static LogicalResult generateCopy(
       *nEnd = Block::iterator(tagDeallocOp.getOperation());
   }
 
-  // Generate dealloc for the buffer.
-  if (!existingBuf) {
+  // Generate dealloc for the buffer only if buffer is allocated in heap.
+  if (!existingBuf && copyOptions.useHeapAllocation) {
     auto bufDeallocOp = epilogue.create<memref::DeallocOp>(loc, fastMemRef);
     // When generating pointwise copies, `nEnd' has to be set to deallocOp on
     // the fast buffer (since it marks the new end insertion point).
