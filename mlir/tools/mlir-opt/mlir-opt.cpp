@@ -102,6 +102,7 @@ void registerTestPDLByteCodePass();
 void registerTestPreparationPassWithAllowedMemrefResults();
 void registerTestRecursiveTypesPass();
 void registerTestSCFUtilsPass();
+void registerTestSpecializeAffineForWMMAPass();
 void registerTestVectorConversions();
 } // namespace test
 } // namespace mlir
@@ -182,6 +183,7 @@ void registerTestPasses() {
   test::registerTestPDLByteCodePass();
   test::registerTestRecursiveTypesPass();
   test::registerTestSCFUtilsPass();
+  test::registerTestSpecializeAffineForWMMAPass();
   test::registerTestVectorConversions();
 }
 #endif

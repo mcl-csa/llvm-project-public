@@ -7,6 +7,7 @@ add_mlir_library(MLIRTestTransforms
   TestLoopMapping.cpp
   TestLoopParametricTiling.cpp
   TestLoopUnrolling.cpp
+  TestSpecializeAffineForWMMA.cpp
 
   EXCLUDE_FROM_LIBMLIR
 
