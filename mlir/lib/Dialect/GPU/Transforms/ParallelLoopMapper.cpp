@@ -12,7 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/GPU/ParallelLoopMapper.h"
-
+#include "mlir/Transforms/LoopUtils.h"
 #include "mlir/Dialect/GPU/GPUDialect.h"
 #include "mlir/Dialect/GPU/Passes.h"
 #include "mlir/Dialect/SCF/SCF.h"
@@ -61,7 +61,7 @@ LogicalResult setMappingAttr(scf::ParallelOp ploopOp,
 
 namespace {
 
-enum MappingLevel { MapGrid = 0, MapBlock = 1, Sequential = 2 };
+enum MappingLevel { MapGrid = 0, MapWarp = 1, MapBlock = 2, Sequential = 3 };
 
 static constexpr int kNumHardwareIds = 3;
 
@@ -100,7 +100,19 @@ static gpu::Processor getHardwareIdForMapping(MappingLevel level,
       return Processor::Sequential;
     }
     break;
-  case MapBlock:
+    case MapWarp:
+    switch (dimension) {
+    case 0:
+      return Processor::WarpX;
+    case 1:
+      return Processor::WarpY;
+    case 2:
+      return Processor::WarpZ;
+    default:
+      return Processor::Sequential;
+    }
+    break;
+    case MapBlock:
     switch (dimension) {
     case 0:
       return Processor::ThreadX;
@@ -116,15 +128,31 @@ static gpu::Processor getHardwareIdForMapping(MappingLevel level,
   return Processor::Sequential;
 }
 
+static ParallelOp collapseCopyLoop(ParallelOp parallelLoop){
+  std::vector<unsigned> combinedDimensions;
+  for (unsigned i = 0, e = parallelLoop.getNumLoops(); i < e; ++i)
+    combinedDimensions.push_back(i);
+  ParallelOp collapsedLoop = collapseParallelLoops(parallelLoop, combinedDimensions);
+  return collapsedLoop;
+}
+
 /// Add mapping information to the given parallel loop. Do not add
 /// mapping information if the loop already has it. Also, don't
 /// start a mapping at a nested loop.
 static void mapParallelOp(ParallelOp parallelOp,
                           MappingLevel mappingLevel = MapGrid) {
+
   // Do not try to add a mapping to already mapped loops or nested loops.
   if (parallelOp->getAttr(getMappingAttrName()) ||
-      ((mappingLevel == MapGrid) && parallelOp->getParentOfType<ParallelOp>()))
+      ((mappingLevel == MapGrid) && parallelOp->getParentOfType<ParallelOp>() &&
+       !parallelOp->getAttr("isCopyLoopNest")))
     return;
+
+  // The copy loop nests are mapped to the thread blocks.
+  if (parallelOp->getAttr("isCopyLoopNest")){
+    mappingLevel = MapGrid;
+    parallelOp = collapseCopyLoop(parallelOp);
+  }
 
   MLIRContext *ctx = parallelOp.getContext();
   Builder b(ctx);
@@ -135,6 +163,16 @@ static void mapParallelOp(ParallelOp parallelOp,
         getHardwareIdForMapping(mappingLevel, i), b.getDimIdentityMap(),
         b.getDimIdentityMap()));
   }
+  
+  // If the `parallelOp` is 2 or more dimensional then interchanging the first
+  // two mapping attributes in order to map the i loop to y-dimension and
+  // j loop the x-dimension because it is more intuitive.
+  if (parallelOp.getNumLoops() >= 2) {
+    ParallelLoopDimMapping attr = attrs[0];
+    attrs[0] = attrs[1];
+    attrs[1] = attr;
+  }
+
   (void)setMappingAttr(parallelOp, attrs);
   ++mappingLevel;
   // Parallel loop operations are immediately nested, so do not use

@@ -18,6 +18,8 @@
 #include "mlir/IR/Block.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/None.h"
+#include "llvm/Transforms/IPO/Attributor.h"
 
 namespace mlir {
 class AffineForOp;
@@ -241,7 +243,7 @@ void coalesceLoops(MutableArrayRef<scf::ForOp> loops);
 /// Take the ParallelLoop and for each set of dimension indices, combine them
 /// into a single dimension. combinedDimensions must contain each index into
 /// loops exactly once.
-void collapseParallelLoops(scf::ParallelOp loops,
+scf::ParallelOp collapseParallelLoops(scf::ParallelOp loops,
                            ArrayRef<std::vector<unsigned>> combinedDimensions);
 
 /// Maps `forOp` for execution on a parallel grid of virtual `processorIds` of
