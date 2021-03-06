@@ -101,7 +101,8 @@ void getTileableBands(FuncOp f,
 LogicalResult
 tilePerfectlyNested(MutableArrayRef<AffineForOp> input,
                     ArrayRef<unsigned> tileSizes,
-                    SmallVectorImpl<AffineForOp> *tiledNest = nullptr);
+                    SmallVectorImpl<AffineForOp> *tiledNest = nullptr,
+                    bool hasToDoRelativeIndexing = false);
 
 /// Tiles the specified band of perfectly nested loops creating tile-space
 /// loops and intra-tile loops, using SSA values as tiling parameters. A band

@@ -178,7 +178,8 @@ void LoopTiling::runOnFunction() {
       diag << "]\n";
     }
     SmallVector<AffineForOp, 6> tiledNest;
-    if (failed(tilePerfectlyNested(band, tileSizes, &tiledNest)))
+    if (failed(tilePerfectlyNested(band, tileSizes, &tiledNest,
+                                   this->hasToDoRelativeIndexing)))
       return signalPassFailure();
 
     // Separate full and partial tiles.

@@ -831,7 +831,8 @@ static void constructParametricallyTiledIndexSetHyperRect(
 /// hyper-rectangular index sets, where the bounds of one dimension do not
 /// depend on other dimensions. Bounds of each dimension can thus be treated
 /// independently, and deriving the new bounds is much simpler and faster
-/// than for the case of tiling arbitrary polyhedral shapes.
+/// than for the case of tiling arbitrary polyhedral shapes. This utility does
+/// absolute indexing.
 static void
 constructTiledIndexSetHyperRect(MutableArrayRef<AffineForOp> origLoops,
                                 MutableArrayRef<AffineForOp> newLoops,
@@ -915,13 +916,121 @@ constructTiledIndexSetHyperRect(MutableArrayRef<AffineForOp> origLoops,
   }
 }
 
+/// Adds two values `valueA` and `valueB` by creating AffineApplyOp at location
+/// `loc` using OpBuilder `builder`.
+static Value addTwoValues(OpBuilder builder, Location loc, Value valueA,
+                          Value valueB) {
+  AffineExpr expr = builder.getAffineDimExpr(0) + builder.getAffineDimExpr(1);
+  AffineMap map = AffineMap::get(2, 0, expr);
+  SmallVector<Value, 2> values{valueA, valueB};
+  return builder.create<AffineApplyOp>(loc, map, values).getResult();
+}
+
+/// Constructs and sets new loop bounds after tiling for the case of
+/// hyper-rectangular index sets, where the bounds of one dimension do not
+/// depend on other dimensions. Bounds of each dimension can thus be treated
+/// independently, and deriving the new bounds is much simpler and faster
+/// than for the case of tiling arbitrary polyhedral shapes. This utility
+/// does relative indexing.
+static void
+constructTiledRelativeIndexSetHyperRect(MutableArrayRef<AffineForOp> origLoops,
+                                        MutableArrayRef<AffineForOp> newLoops,
+                                        ArrayRef<unsigned> tileSizes) {
+  assert(!origLoops.empty());
+  assert(origLoops.size() == tileSizes.size());
+
+  OpBuilder b(origLoops[0].getOperation());
+  unsigned width = origLoops.size();
+
+  // Bounds for tile space loops.
+  for (unsigned i = 0; i < width; i++) {
+    OperandRange newLbOperands = origLoops[i].getLowerBoundOperands();
+    OperandRange newUbOperands = origLoops[i].getUpperBoundOperands();
+    newLoops[i].setLowerBound(newLbOperands, origLoops[i].getLowerBoundMap());
+    newLoops[i].setUpperBound(newUbOperands, origLoops[i].getUpperBoundMap());
+    newLoops[i].setStep(tileSizes[i] * origLoops[i].getStep());
+  }
+  // Bounds for intra-tile loops.
+  for (unsigned i = 0; i < width; i++) {
+    int64_t largestDiv = getLargestDivisorOfTripCount(origLoops[i]);
+    Optional<uint64_t> mayBeConstantCount = getConstantTripCount(origLoops[i]);
+    // The lower bound is constant zero.
+    newLoops[width + i].setConstantLowerBound(0);
+    // The step sizes of intra-tile loops is just the original loops' step size.
+    newLoops[width + i].setStep(origLoops[i].getStep());
+
+    // Set the upper bound.
+    if (mayBeConstantCount && mayBeConstantCount.getValue() < tileSizes[i]) {
+      // Trip count is less than the tile size: upper bound is
+      // trip count * stepSize.
+      newLoops[width + i].setConstantUpperBound(mayBeConstantCount.getValue() *
+                                                origLoops[i].getStep());
+    } else if (largestDiv % (tileSizes[i] * origLoops[i].getStep()) != 0) {
+      // Intra-tile loop ii goes from 0 to min(tileSize * stepSize, ub_i - i).
+      // Construct the upper bound map; the operands are the original operands.
+      // The new upper bound map is the original one with an additional
+      // expression tileSize * stepSize appended.
+
+      // Add dim operands from original upper bound.
+      SmallVector<Value, 4> ubOperands;
+      AffineBound ub = origLoops[i].getUpperBound();
+      ubOperands.reserve(ub.getNumOperands() + 1);
+      AffineMap origUbMap = ub.getMap();
+      for (unsigned j = 0, e = origUbMap.getNumDims(); j < e; ++j)
+        ubOperands.push_back(ub.getOperand(j));
+
+      // Add original loop iv i.e. i as a dim operand.
+      ubOperands.push_back(origLoops[i].getInductionVar());
+
+      // Add symbol operands from original upper bound.
+      for (unsigned j = 0, e = origUbMap.getNumSymbols(); j < e; ++j)
+        ubOperands.push_back(ub.getOperand(origUbMap.getNumDims() + j));
+
+      SmallVector<AffineExpr, 4> boundExprs;
+      boundExprs.reserve(1 + origUbMap.getNumResults());
+
+      // The new upper bound map is the original one with loopIV (i) subtracted
+      // from all the results of original loops' upper bound and an additional
+      // expression tileSize * stepSize appended.
+      boundExprs.push_back(
+          b.getAffineConstantExpr(tileSizes[i] * origLoops[i].getStep()));
+      // `dimExpr` corresponds to the original loopsIV.
+      AffineExpr dimExpr = b.getAffineDimExpr(origUbMap.getNumDims());
+      for (AffineExpr expr : origUbMap.getResults())
+        boundExprs.push_back(expr - dimExpr);
+      AffineMap ubMap =
+          AffineMap::get(1 + origUbMap.getNumDims(), origUbMap.getNumSymbols(),
+                         boundExprs, b.getContext());
+      newLoops[width + i].setUpperBound(/*operands=*/ubOperands, ubMap);
+    } else {
+      // No need of the min expression.
+      newLoops[width + i].setConstantUpperBound(tileSizes[i] *
+                                                origLoops[i].getStep());
+    }
+  }
+}
+
 /// Tiles the specified band of perfectly nested loops creating tile-space loops
 /// and intra-tile loops. A band is a contiguous set of loops.
+/// 'hasToDoRelativeIndexing' specifies whether the absolute indexing has to be
+/// done or the relative indexing.
+///
+/// Absolute Indeing:
+/// Let's suppose that the loop i = 0 to n step 1 is tiled with a tile size of
+/// t, then the loop i will now go from 0 to n in steps of t and the intra-tile
+/// loop ii will go from ii = i to min(i + t, n) step 1. Also all the uses of
+/// i are now replaced with ii.
+///
+/// Relative Indeing:
+/// Let's suppose that the loop i = 0 to n step 1 is tiled with a tile size of
+/// t, then the loop i will now go from 0 to n in steps of t and the intra-tile
+/// loop ii will go from ii = 0 to min(t, n - i) step 1. Also all the uses of
+/// i are now replaced with i + ii.
 //  TODO: handle non hyper-rectangular spaces.
-LogicalResult
-mlir::tilePerfectlyNested(MutableArrayRef<AffineForOp> input,
-                          ArrayRef<unsigned> tileSizes,
-                          SmallVectorImpl<AffineForOp> *tiledNest) {
+LogicalResult mlir::tilePerfectlyNested(MutableArrayRef<AffineForOp> input,
+                                        ArrayRef<unsigned> tileSizes,
+                                        SmallVectorImpl<AffineForOp> *tiledNest,
+                                        bool hasToDoRelativeIndexing) {
   performPreTilingChecks(input, tileSizes);
 
   MutableArrayRef<AffineForOp> origLoops = input;
@@ -940,12 +1049,36 @@ mlir::tilePerfectlyNested(MutableArrayRef<AffineForOp> input,
   if (failed(checkIfHyperRectangular(input, rootAffineForOp, width)))
     return failure();
 
-  // Set loop bounds for the tiled loop nest.
-  constructTiledIndexSetHyperRect(origLoops, tiledLoops, tileSizes);
+  // True if relative indexing has to be done.
+  if (hasToDoRelativeIndexing) {
+    // Set loop bounds for the tiled loop nest.
+    constructTiledRelativeIndexSetHyperRect(origLoops, tiledLoops, tileSizes);
 
-  // Replace original IVs with intra-tile loop IVs.
-  for (unsigned i = 0; i < width; i++)
-    origLoopIVs[i].replaceAllUsesWith(tiledLoops[i + width].getInductionVar());
+    AffineForOp innermostLoop = tiledLoops[2 * width - 1];
+    OpBuilder builder(innermostLoop.getLoopBody());
+    // Replace original IVs with the sum of inter-tile and intra-tile loop IVs
+    // except for the intra-tile loop.
+    for (unsigned i = 0; i < width; i++) {
+      origLoopIVs[i].replaceAllUsesExcept(
+          addTwoValues(builder, innermostLoop.getLoc(),
+                       tiledLoops[i].getInductionVar(),
+                       tiledLoops[i + width].getInductionVar()),
+          SmallPtrSet<Operation *, 1>{tiledLoops[i + width].getOperation()});
+      // Replace original IVs with the inter-tile loop IVs only for the
+      // intra-tile loop.
+      tiledLoops[i + width].getOperation()->replaceUsesOfWith(
+          origLoopIVs[i], tiledLoops[i].getInductionVar());
+    }
+  } else {
+    // True if absolute indexing has to be done.
+    // Set loop bounds for the tiled loop nest.
+    constructTiledIndexSetHyperRect(origLoops, tiledLoops, tileSizes);
+
+    // Replace original IVs with intra-tile loop IVs.
+    for (unsigned i = 0; i < width; i++)
+      origLoopIVs[i].replaceAllUsesWith(
+          tiledLoops[i + width].getInductionVar());
+  }
 
   // Erase the old loop nest.
   rootAffineForOp.erase();

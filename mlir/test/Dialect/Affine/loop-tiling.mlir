@@ -1,6 +1,7 @@
 // RUN: mlir-opt %s -split-input-file -affine-loop-tile="tile-size=32" | FileCheck %s
 // RUN: mlir-opt %s -split-input-file -affine-loop-tile="cache-size=512" | FileCheck %s --check-prefix=MODEL
 // RUN: mlir-opt %s -split-input-file -affine-loop-tile="tile-size=32 separate" | FileCheck %s --check-prefix=SEPARATE
+// RUN: mlir-opt %s -split-input-file -affine-loop-tile="tile-size=32 relative-indexing=1" | FileCheck %s --check-prefix=RELATIVE
 
 // -----
 
@@ -289,3 +290,49 @@ func @separate_full_tile_1d_max_min(%M : index, %N : index, %P : index, %Q : ind
 // SEPARATE-NEXT:        }
 // SEPARATE-NEXT:      }
 // SEPARATE-NEXT:    }
+
+// -----
+
+// RELATIVE-DAG: [[$UB:#map[0-9]+]] = affine_map<(d0)[s0] -> (32, -d0 + s0)>
+// RELATIVE-DAG: #map{{.*}} = affine_map<(d0, d1) -> (d0 + d1)>
+
+// RELATIVE-LABEL: func @matmul()
+func @matmul() {
+  %0 = memref.alloc() : memref<1024x1024xf32>
+  %1 = memref.alloc() : memref<1024x1024xf32>
+  %2 = memref.alloc() : memref<1024x1024xf32>
+  %c0 = constant 0 : index
+  %c1 = constant 1 : index
+  %3 = memref.dim %0, %c0 : memref<1024x1024xf32>
+  %4 = memref.dim %1, %c1 : memref<1024x1024xf32>
+  %5 = memref.dim %0, %c1 : memref<1024x1024xf32>
+  affine.for %arg0 = 0 to %3 {
+    affine.for %arg1 = 0 to %4 {
+      affine.for %arg2 = 0 to %5 {
+        %6 = affine.load %0[%arg0, %arg2] : memref<1024x1024xf32>
+        %7 = affine.load %1[%arg2, %arg1] : memref<1024x1024xf32>
+        %8 = affine.load %2[%arg0, %arg1] : memref<1024x1024xf32>
+        %9 = mulf %6, %7 : f32
+        %10 = addf %8, %9 : f32
+        affine.store %10, %2[%arg0, %arg1] : memref<1024x1024xf32>
+      }
+    }
+  }
+  return
+}
+
+// RELATIVE:   affine.for %[[I:.*]] = 0 to %{{.*}} step 32 {
+// RELATIVE-NEXT:     affine.for %[[J:.*]] = 0 to %{{.*}} step 32 {
+// RELATIVE-NEXT:       affine.for %[[K:.*]] = 0 to %{{.*}} step 32 {
+// RELATIVE-NEXT:         affine.for %[[II:.*]] = 0 to min [[$UB]](%[[I]])[%{{.*}}] {
+// RELATIVE-NEXT:           affine.for %[[JJ:.*]] = 0 to min [[$UB]](%[[J]])[%{{.*}}] {
+// RELATIVE-NEXT:             affine.for %[[KK:.*]] = 0 to min [[$UB]](%[[K]])[%{{.*}}] {
+// RELATIVE-NEXT:               affine.apply #map{{.*}}(%[[I]], %[[II]])
+// RELATIVE-NEXT:               affine.apply #map{{.*}}(%[[J]], %[[JJ]])
+// RELATIVE-NEXT:               affine.apply #map{{.*}}(%[[K]], %[[KK]])
+// RELATIVE-NEXT:               affine.load %{{.*}}[%{{.*}}, %{{.*}}] : memref<1024x1024xf32>
+// RELATIVE-NEXT:               affine.load %{{.*}}[%{{.*}}, %{{.*}}] : memref<1024x1024xf32>
+// RELATIVE-NEXT:               affine.load %{{.*}}[%{{.*}}, %{{.*}}] : memref<1024x1024xf32>
+// RELATIVE-NEXT:               mulf %{{.*}}, %{{.*}} : f32
+// RELATIVE-NEXT:               addf %{{.*}}, %{{.*}} : f32
+// RELATIVE-NEXT:               affine.store %{{.*}}, %{{.*}}[%{{.*}}, %{{.*}}] : memref<1024x1024xf32>
