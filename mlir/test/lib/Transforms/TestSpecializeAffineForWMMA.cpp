@@ -29,6 +29,13 @@ namespace {
 struct TestSpecializeAffineForWMMA
     : public PassWrapper<TestSpecializeAffineForWMMA, FunctionPass> {
   void runOnFunction() override;
+
+  TestSpecializeAffineForWMMA(){};
+  TestSpecializeAffineForWMMA(const TestSpecializeAffineForWMMA &) {}
+  explicit TestSpecializeAffineForWMMA(std::string accumulateType) {
+    clAccumulateType = accumulateType;
+  }
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<gpu::GPUDialect, mlir::vector::VectorDialect>();
   }
@@ -46,6 +53,9 @@ struct TestSpecializeAffineForWMMA
     ThreadK
   };
 
+  /// Number of total Matmul operands.
+  constexpr static unsigned kNumMatmulOperands = 4;
+
   /// Enum containing GEMM operands, usefull in accessing certain containers.
   enum WmmaOps { AOp, BOp, COp, DOp };
 
@@ -59,13 +69,6 @@ struct TestSpecializeAffineForWMMA
   /// Constant representing the number of loops in untiled matmul.
   constexpr static unsigned kNumIntialLoops = 3;
 
-  // TODO: This should be in some kind of structure which has all the operand
-  // numbers according to the version of the wmma op being used. Perhaps
-  // it should be moved into a different header file.
-  /// Array representing the number of elements in the mmaFragment corresponding
-  /// to a particular operand.
-  unsigned numElems[4] = {8, 8, 4, 4};
-
   /// Constant representing the shape of WMMA op in M dimension.
   constexpr static unsigned kWMMAM = 16;
 
@@ -74,6 +77,10 @@ struct TestSpecializeAffineForWMMA
 
   /// Constant representing the shape of WMMA op in K dimension.
   constexpr static unsigned kWMMAK = 16;
+
+  Option<std::string> clAccumulateType{
+      *this, "accum", llvm::cl::desc("Accumulate type to use for matmul."),
+      llvm::cl::init("f16")};
 };
 } // end anonymous namespace
 
@@ -377,6 +384,26 @@ void moveInvariantLoadStorePairs(FuncOp funcOp, OpBuilder b) {
 
 void TestSpecializeAffineForWMMA::runOnFunction() {
   FuncOp funcOp = getFunction();
+  MLIRContext *context = funcOp.getContext();
+
+  Type cdOpType, abOpType;
+  abOpType = FloatType::getF16(context);
+
+  Type operandElemTypes[kNumMatmulOperands];
+
+  // Initialize the numElems array to hold the correct number of elements by
+  // inspecting the accumulate version.
+  if (clAccumulateType.getValue().compare("f16") == 0) {
+    cdOpType = abOpType;
+  } else if (clAccumulateType.getValue().compare("f32") == 0) {
+    cdOpType = FloatType::getF32(context);
+  }
+
+  // Set Element type for GPU WmmaOps.
+  operandElemTypes[AOp] = abOpType;
+  operandElemTypes[BOp] = abOpType;
+  operandElemTypes[COp] = cdOpType;
+  operandElemTypes[DOp] = cdOpType;
 
   // Check and mark the parallel loops in the IR.
   funcOp.walk([&](AffineForOp loop) {
@@ -384,12 +411,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
       loop->setAttr("isParallel", BoolAttr::get(loop.getContext(), true));
   });
 
-  // Try to find out the loop structure and identify the levels of tiling
-  // done. Get the root for op first.
-  MLIRContext *context = funcOp.getContext();
-  VectorType cOpType = VectorType::get(2, FloatType::getF16(context));
-  // Only one AffineForOp expected, representing the root ForOp for the matmul
-  // code.
+  // Get the root for op first.
   AffineForOp rootForOp;
   funcOp.walk([&](AffineForOp forOp) {
     if (!forOp->getParentOfType<AffineForOp>()) {
@@ -398,6 +420,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
     }
   });
 
+  // Find All the compute loops in the rootForOp.
   SmallVector<AffineForOp> computeLoops;
   findComputeLoops(rootForOp, computeLoops);
 
@@ -502,9 +525,10 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
       } else {
         // Create GPU WMMA loadOp.
         wmmaOps.push_back(b.create<gpu::SubgroupMmaLoadMatrixOp>(
-            loc, gpu::MMAFragmentType::get(numElems[numOpsProcessed], cOpType),
-            loadOp.memref(), index, b.getIndexAttr(opType.getDimSize(0)),
-            b.getStringAttr(ops[numOpsProcessed])));
+            loc,
+            gpu::MMAMatrixType::get({16, 16}, operandElemTypes[numOpsProcessed],
+                                    ops[numOpsProcessed]),
+            loadOp.memref(), index, b.getIndexAttr(opType.getDimSize(1))));
         ++numOpsProcessed;
       }
     } else if (auto storeOp = dyn_cast<AffineStoreOp>(op)) {
@@ -512,7 +536,8 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
         // If this is the last loadOp that is being processed, Then we can
         // emit the compute and store op also.
         wmmaOps.push_back(b.create<gpu::SubgroupMmaComputeOp>(
-            loc, gpu::MMAFragmentType::get(numElems[COp], cOpType),
+            loc,
+            gpu::MMAMatrixType::get({16, 16}, operandElemTypes[COp], ops[COp]),
             wmmaOps[numOpsProcessed - 3], wmmaOps[numOpsProcessed - 2],
             wmmaOps[numOpsProcessed - 1]));
 
@@ -582,7 +607,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
     assert(loopUnrollJamByFactor(
                computeLoops[ThreadJ],
                getConstantTripCount(computeLoops[ThreadJ]).getValue())
-               .failed() &&
+               .succeeded() &&
            "Unable to unroll loop, please inspect the IR");
   }
 
@@ -591,11 +616,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
          "Unable to unroll loop, please inspect the IR");
 
   // Promote the now innermostLoop, which is the `k` loop.
-  // TODO: Check why failure is returned even when the loop has been promoted.
-  if (promoteIfSingleIteration(computeLoops[ThreadI]).failed())
-    innermostLoop = computeLoops[WarpK];
-  else
-    innermostLoop = computeLoops[ThreadI];
+  (void)promoteIfSingleIteration(computeLoops[ThreadI]);
 
   // We need to move ops from inside to the outside level which are invariant
   // on the surrounding loop ivs. We handle side effecting operations in a
@@ -614,7 +635,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   funcOp.walk([&](AffineForOp forOp) {
     if (auto isParallel = forOp->getAttrOfType<BoolAttr>("isParallel")) {
       if (isParallel.getValue() == true)
-        affineParallelize(forOp);
+        (void)affineParallelize(forOp);
     }
   });
 }
