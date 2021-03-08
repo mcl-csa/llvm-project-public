@@ -18,8 +18,6 @@
 #include "mlir/IR/Block.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
-#include "llvm/ADT/None.h"
-#include "llvm/Transforms/IPO/Attributor.h"
 
 namespace mlir {
 class AffineForOp;

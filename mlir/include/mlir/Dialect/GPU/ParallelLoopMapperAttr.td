@@ -19,16 +19,16 @@ include "mlir/Dialect/GPU/GPUBase.td"
 def BlockX : I64EnumAttrCase<"BlockX", 0>;
 def BlockY : I64EnumAttrCase<"BlockY", 1>;
 def BlockZ : I64EnumAttrCase<"BlockZ", 2>;
-def WarpX : I64EnumAttrCase<"WarpX", 3>;
-def WarpY : I64EnumAttrCase<"WarpY", 4>;
-def WarpZ : I64EnumAttrCase<"WarpZ", 5>;
-def ThreadX : I64EnumAttrCase<"ThreadX", 6>;
-def ThreadY : I64EnumAttrCase<"ThreadY", 7>;
-def ThreadZ : I64EnumAttrCase<"ThreadZ", 8>;
+def ThreadX : I64EnumAttrCase<"ThreadX", 3>;
+def ThreadY : I64EnumAttrCase<"ThreadY", 4>;
+def ThreadZ : I64EnumAttrCase<"ThreadZ", 5>;
+def WarpX : I64EnumAttrCase<"WarpX", 6>;
+def WarpY : I64EnumAttrCase<"WarpY", 7>;
+def WarpZ : I64EnumAttrCase<"WarpZ", 8>;
 def Sequential : I64EnumAttrCase<"Sequential", 9>;
 
 def ProcessorAttr : I64EnumAttr<"Processor", "processor for loop mapping", [
-    BlockX, BlockY, BlockZ, WarpX, WarpY, WarpZ, ThreadX, ThreadY, ThreadZ,
+    BlockX, BlockY, BlockZ, ThreadX, ThreadY, ThreadZ, WarpX, WarpY, WarpZ,
     Sequential]> {
   let cppNamespace = "::mlir::gpu";
 }
