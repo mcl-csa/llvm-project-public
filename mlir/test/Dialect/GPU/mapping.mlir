@@ -48,16 +48,16 @@ func @parallel_loop_4d(%arg0 : index, %arg1 : index, %arg2 : index,
 // CHECK:           scf.parallel
 // CHECK:             scf.parallel
 // CHECK:               scf.parallel
-// CHECK:      {mapping = [{bound = #[[$MAP]], map = #[[$MAP]], processor = 6 : i64},
-// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 6 : i64},
-// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 6 : i64},
-// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 6 : i64}]}
+// CHECK:      {mapping = [{bound = #[[$MAP]], map = #[[$MAP]], processor = 9 : i64},
+// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 9 : i64},
+// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 9 : i64},
+// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 9 : i64}]}
 // CHECK:      {mapping = [{bound = #[[$MAP]], map = #[[$MAP]], processor = 3 : i64},
 // CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 4 : i64},
 // CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 5 : i64},
-// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 6 : i64}]}
+// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 9 : i64}]}
 // CHECK:      {mapping = [{bound = #[[$MAP]], map = #[[$MAP]], processor = 0 : i64},
 // CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 1 : i64},
 // CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 2 : i64},
-// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 6 : i64}]}
+// CHECK-SAME:             {bound = #[[$MAP]], map = #[[$MAP]], processor = 9 : i64}]}
 // CHECK-NOT: mapping
