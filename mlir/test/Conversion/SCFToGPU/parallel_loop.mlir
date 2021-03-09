@@ -110,7 +110,7 @@ func @parallel_loop_bidy_seq(%arg0 : index, %arg1 : index, %arg2 : index,
     memref.store %val, %res[%i1, %i0] : memref<?x?xf32>
   } { mapping = [
       {processor = 1, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>},
-      {processor = 9, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
+      {processor = 6, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
     ] }
   return
 }
@@ -157,11 +157,11 @@ func @parallel_loop_tiled_seq(%arg0 : index, %arg1 : index, %arg2 : index,
       memref.store %val, %res[%idx1, %idx0] : memref<?x?xf32>
     } { mapping = [
         {processor = 4, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>},
-        {processor = 9, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
+        {processor = 6, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
       ] }
   } { mapping = [
       {processor = 1, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>},
-      {processor = 9, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
+      {processor = 6, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
     ] }
   return
 }
@@ -357,11 +357,11 @@ func @parallel_loop_loop_variant_bound(%arg0 : index, %arg1 : index, %arg2 : ind
       memref.store %val, %res[%idx1, %idx0] : memref<?x?xf32>
     } { mapping = [
         {processor = 4, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>},
-        {processor = 9, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
+        {processor = 6, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
       ] }
   } { mapping = [
       {processor = 1, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>},
-      {processor = 9, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
+      {processor = 6, map = affine_map<(d0) -> (d0)>, bound = affine_map<(d0) -> (d0)>}
     ] }
   return
 }

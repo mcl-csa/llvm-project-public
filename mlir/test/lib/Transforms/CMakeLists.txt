@@ -2,7 +2,6 @@
 add_mlir_library(MLIRTestTransforms
   TestConstantFold.cpp
   TestConvertSCFToGPU.cpp
-  TestGpuMatmulParallelLoopMapping.cpp
   TestInlining.cpp
   TestLoopFusion.cpp
   TestLoopMapping.cpp
