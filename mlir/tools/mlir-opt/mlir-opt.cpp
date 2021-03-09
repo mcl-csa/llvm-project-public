@@ -42,7 +42,7 @@ void registerTestAllReduceLoweringPass();
 void registerTestFunc();
 void registerTestGpuMemoryPromotionPass();
 void registerTestGpuMatmulParallelLoopMappingPass();
-void registerTestConvertSCFToGPUPass();
+void registerTestConvertMatmulParallelLoopsToGPUPass();
 void registerTestLoopPermutationPass();
 void registerTestMatchers();
 void registerTestPrintDefUsePass();
@@ -123,7 +123,7 @@ void registerTestPasses() {
   registerTestFunc();
   registerTestGpuMemoryPromotionPass();
   registerTestGpuMatmulParallelLoopMappingPass();
-  registerTestConvertSCFToGPUPass();
+  registerTestConvertMatmulParallelLoopsToGPUPass();
   registerTestLoopPermutationPass();
   registerTestMatchers();
   registerTestPrintDefUsePass();

@@ -1,7 +1,7 @@
 # Exclude tests from libMLIR.so
 add_mlir_library(MLIRTestTransforms
   TestConstantFold.cpp
-  TestConvertSCFToGPU.cpp
+  TestConvertMatmulParallelLoopsToGPU.cpp
   TestGpuMatmulParallelLoopMapping.cpp
   TestInlining.cpp
   TestLoopFusion.cpp

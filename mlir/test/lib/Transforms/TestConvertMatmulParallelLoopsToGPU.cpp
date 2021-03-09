@@ -1,4 +1,4 @@
-//===------ TestConvertSCFToGPU.cpp ----------- convert loops to gpu
+//===------ TestConvertMatmulParallelLoopsToGPU.cpp ----------------------===//
 //--------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -7,7 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements a pass to test the conversion of loops to gpu.
+// This file implements a pass to test the conversion of parallel loops to gpu
+// for matmul.
 //
 //===----------------------------------------------------------------------===//
 
@@ -30,23 +31,25 @@ using namespace mlir;
 using namespace mlir::scf;
 
 namespace {
-class TestConvertSCFToGPUPass
-    : public PassWrapper<TestConvertSCFToGPUPass, OperationPass<>> {
+class TestConvertMatmulParallelLoopsToGPUPass
+    : public PassWrapper<TestConvertMatmulParallelLoopsToGPUPass,
+                         OperationPass<>> {
 public:
   void runOnOperation() override;
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<AffineDialect>();
     registry.insert<gpu::GPUDialect>();
   }
-  TestConvertSCFToGPUPass(){};
-  TestConvertSCFToGPUPass(const TestConvertSCFToGPUPass &) {}
-  explicit TestConvertSCFToGPUPass(ArrayRef<int64_t> tbSizes) {
+  TestConvertMatmulParallelLoopsToGPUPass(){};
+  TestConvertMatmulParallelLoopsToGPUPass(
+      const TestConvertMatmulParallelLoopsToGPUPass &) {}
+  explicit TestConvertMatmulParallelLoopsToGPUPass(ArrayRef<int64_t> tbSizes) {
     tbDimsRef = tbSizes;
   }
 
   ListOption<int64_t> tbDimsRef{
-      *this, "launch-params", llvm::cl::MiscFlags::CommaSeparated,
-      llvm::cl::desc("List of thread block launch parameters")};
+      *this, "block-dimensions", llvm::cl::MiscFlags::CommaSeparated,
+      llvm::cl::desc("List of thread block dimensions for kernel launch.")};
 
   // Default warp size is 32.
   Option<int64_t> warpSizeRef{
@@ -59,6 +62,18 @@ public:
 } // end namespace
 
 namespace {
+
+struct LoopsToGpuLowering : public OpRewritePattern<ParallelOp> {
+  using OpRewritePattern<ParallelOp>::OpRewritePattern;
+  explicit LoopsToGpuLowering(MLIRContext *context, ArrayRef<int64_t> tbSizes)
+      : OpRewritePattern<ParallelOp>(context), tbDims(tbSizes) {}
+
+  LogicalResult matchAndRewrite(ParallelOp parallelOp,
+                                PatternRewriter &rewriter) const override;
+
+private:
+  ArrayRef<int64_t> tbDims;
+};
 
 static int64_t warpSize;
 Value linearTidXYZ, numThreadsXYZ, linearWarpId, mTile, nTile, numWarps,
@@ -75,17 +90,17 @@ static unsigned getLaunchOpArgumentNum(gpu::Processor processor) {
     return 1;
   case gpu::Processor::BlockZ:
     return 2;
-  case gpu::Processor::WarpX:
-    return 3;
-  case gpu::Processor::WarpY:
-    return 4;
-  case gpu::Processor::WarpZ:
-    return 5;
   case gpu::Processor::ThreadX:
-    return 6;
+    return 3;
   case gpu::Processor::ThreadY:
-    return 7;
+    return 4;
   case gpu::Processor::ThreadZ:
+    return 5;
+  case gpu::Processor::WarpX:
+    return 6;
+  case gpu::Processor::WarpY:
+    return 7;
+  case gpu::Processor::WarpZ:
     return 8;
   default:;
   }
@@ -93,55 +108,43 @@ static unsigned getLaunchOpArgumentNum(gpu::Processor processor) {
       "invalid processor type while retrieving launch op argument number");
 }
 
+/// Checks if `parallelOp` is a copy loop/loop nest or not. Here we have taken a
+/// conservative approach for identifying copy loop. We define a loop as a
+/// copy loop if it consists of exactly one load op and one store op.
 bool checkIfCopyLoop(ParallelOp parallelOp) {
-  BoolAttr copyLoop = parallelOp->getAttrOfType<BoolAttr>("isCopyLoopNest");
-  if (copyLoop) {
-    if (copyLoop.getValue())
-      return true;
-  }
+  unsigned numLoad = 0, numStore = 0;
+  parallelOp.walk([&](memref::LoadOp load) {
+    if (load)
+      numLoad++;
+  });
+  parallelOp.walk([&](memref::StoreOp store) {
+    if (store)
+      numStore++;
+  });
+  if (numLoad == 1 && numStore == 1)
+    return true;
   return false;
 }
-
-struct LoopsToGpuLowering : public OpRewritePattern<ParallelOp> {
-  using OpRewritePattern<ParallelOp>::OpRewritePattern;
-  explicit LoopsToGpuLowering(MLIRContext *context, ArrayRef<int64_t> tbSizes)
-      : OpRewritePattern<ParallelOp>(context), tbDims(tbSizes) {}
-
-  LogicalResult matchAndRewrite(ParallelOp parallelOp,
-                                PatternRewriter &rewriter) const override;
-
-private:
-  ArrayRef<int64_t> tbDims;
-};
 } // namespace
 
-bool insertLaunchParams(ParallelOp parallelOp, ArrayRef<int64_t> tbDims,
-                        PatternRewriter &rewriter, Location &topLoc,
-                        SmallVectorImpl<Value> &tbDimValues,
-                        SmallVectorImpl<Value> &gridDimValues) {
-
+/// Inserts gpu.launch op parameters in `tbDimValues` and `gridDimValues`.
+static bool insertLaunchParams(ParallelOp parallelOp, ArrayRef<int64_t> tbDims,
+                               PatternRewriter &rewriter, Location &topLoc,
+                               SmallVectorImpl<Value> &tbDimValues,
+                               SmallVectorImpl<Value> &gridDimValues) {
   // Each loop of the parallel op will be mapped to one of the grid dimensions.
   // If the number of loops in th parallel op is greater than 3 then fail.
   // TODO: Handle cases where the number of loops is greater than 3.
   if (parallelOp.getNumLoops() > 3)
     return false;
 
-  // Create ops for dimensions of thread block.
+  // Creating constant ops for dimensions of thread block.
   for (int64_t param : tbDims) {
     tbDimValues.push_back(rewriter.create<ConstantIndexOp>(topLoc, param));
   }
 
-  /////////////////////////////////////////////////////////////////////////////
-  // Create ops for dimensions of grid. The grid dimensions are dependent on the
-  // dimensions of the thread block and the number of iteratoins of the loop
-  // being mapped. Currently making a simple assumption that one thread block
-  // will calculate the	loopStep amount of iterations. Hence the number of
-  // thread blocks to be launched will be (loopUB - loopLB) / loopStep for a
-  // particular loop.
-  /////////////////////////////////////////////////////////////////////////////
-
-  // Create Ops for dimensions of grid. The number of thread blocks to be
-  // launched will be (loopUB + loopStep - 1) / loopStep.
+  // Create Ops for dimensions of grid. The grid dimensions will be
+  // (loopUB + loopStep - 1) / loopStep.
   Value constantOne = rewriter.create<ConstantIndexOp>(topLoc, 1);
   for (auto loop : llvm::zip(parallelOp.upperBound(), parallelOp.step())) {
     Value upperBound, step;
@@ -150,26 +153,15 @@ bool insertLaunchParams(ParallelOp parallelOp, ArrayRef<int64_t> tbDims,
     Value resultB = rewriter.create<SubIOp>(topLoc, resultA, constantOne);
     gridDimValues.insert(gridDimValues.begin(), rewriter.create<UnsignedDivIOp>(
                                                     topLoc, resultB, step));
-    /////////////////////////////////////////////////////////////////////////////
-    // Check if the defining ops for upper/lower bound and step are constant.
-    // If not the return false.
-    // if (isa<ConstantIndexOp>(lowerBound.getDefiningOp()) &&
-    //    isa<ConstantIndexOp>(upperBound.getDefiningOp()) &&
-    //    isa<ConstantIndexOp>(step.getDefiningOp())) {
-    //  Value diff = rewriter.create<SubIOp>(topLoc, upperBound, lowerBound);
-    //  gridDimValues.push_back(
-    //      rewriter.create<SignedDivIOp>(topLoc, diff, step));
-    //} else
-    //  return false;
-    /////////////////////////////////////////////////////////////////////////////
   }
   return true;
 }
 
-LogicalResult convertIfOp(gpu::LaunchOp launchOp, IfOp ifOp,
-                          BlockAndValueMapping &cloningMap,
-                          SmallVectorImpl<Operation *> &worklist,
-                          PatternRewriter &rewriter) {
+/// Converts IfOps by copying them into the gpu.launch op.
+static LogicalResult convertIfOp(gpu::LaunchOp launchOp, IfOp ifOp,
+                                 BlockAndValueMapping &cloningMap,
+                                 SmallVectorImpl<Operation *> &worklist,
+                                 PatternRewriter &rewriter) {
   // The IfOp haves both `ifThen` part and `else` part. Both of them have to
   // be copied over.
   bool hasElseRegion = ifOp.elseRegion().empty() ? false : true;
@@ -178,7 +170,7 @@ LogicalResult convertIfOp(gpu::LaunchOp launchOp, IfOp ifOp,
   auto clonedIfOp = rewriter.create<scf::IfOp>(
       loc, cloningMap.lookupOrDefault(ifOp.condition()), hasElseRegion);
 
-  // First insert the sentinal values which marks the end of the ifOp scope.
+  // First insert the sentinel values which marks the end of the `ifOp` scope.
   worklist.push_back(launchOp.getOperation());
 
   // Now insert the body of the else part into the worklist.
@@ -189,9 +181,7 @@ LogicalResult convertIfOp(gpu::LaunchOp launchOp, IfOp ifOp,
       worklist.push_back(&op);
     }
     // The sentinal for the end of else region is inserted now. The newly
-    // created IfOp is used as the sentinal value. To prevent this IfOp from
-    // being processed again we while processing if the IfOp has a gpu.launch op
-    // as a parent. If yes then this is our sentinal value.
+    // created IfOp is used as the sentinal value.
     worklist.push_back(clonedIfOp.getOperation());
   }
 
@@ -202,16 +192,17 @@ LogicalResult convertIfOp(gpu::LaunchOp launchOp, IfOp ifOp,
   for (Operation &op : llvm::reverse(body->without_terminator())) {
     worklist.push_back(&op);
   }
-
   return success();
 }
 
-LogicalResult convertForLoop(gpu::LaunchOp launchOp, ForOp forOp,
-                             BlockAndValueMapping &cloningMap,
-                             SmallVectorImpl<Operation *> &worklist,
-                             PatternRewriter &rewriter) {
+/// Converts for loop.
+static LogicalResult convertForLoop(gpu::LaunchOp launchOp, ForOp forOp,
+                                    BlockAndValueMapping &cloningMap,
+                                    SmallVectorImpl<Operation *> &worklist,
+                                    PatternRewriter &rewriter) {
   Location loc = forOp.getLoc();
   scf::ForOp loopOp;
+  // Check if for loop returns some results.
   if (forOp.getNumResults() > 0) {
     SmallVector<Value, 4> loopOpIterArgs;
     for (auto args : forOp.getIterOperands())
@@ -257,10 +248,12 @@ LogicalResult convertForLoop(gpu::LaunchOp launchOp, ForOp forOp,
   return success();
 }
 
-LogicalResult convertParallelLoop(gpu::LaunchOp launchOp, ParallelOp parallelOp,
-                                  BlockAndValueMapping &cloningMap,
-                                  SmallVectorImpl<Operation *> &worklist,
-                                  PatternRewriter &rewriter) {
+/// Convert parallel loops.
+static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
+                                         ParallelOp parallelOp,
+                                         BlockAndValueMapping &cloningMap,
+                                         SmallVectorImpl<Operation *> &worklist,
+                                         PatternRewriter &rewriter) {
   Location loc = parallelOp.getLoc();
   if (checkIfCopyLoop(parallelOp)) {
     assert(parallelOp.getNumLoops() == 1 && "Expected a 1-d copy loop.");
@@ -310,7 +303,7 @@ LogicalResult convertParallelLoop(gpu::LaunchOp launchOp, ParallelOp parallelOp,
       // Checks if the loop is mapped to some processor or it is sequental.
       if (isMappedToProcessor(processor)) {
         // Checks if the loop is mapped to a grid.
-        if (processor < gpu::Processor::WarpX) {
+        if (processor < gpu::Processor::ThreadX) {
           // Use the corresponding grid index as replacement for the loop
           // iv.
           Value operand =
@@ -318,49 +311,7 @@ LogicalResult convertParallelLoop(gpu::LaunchOp launchOp, ParallelOp parallelOp,
           Value mulWithStep = rewriter.create<MulIOp>(loc, operand, step);
           Value newIV = rewriter.create<AddIOp>(loc, lowerBound, mulWithStep);
           cloningMap.map(iv, newIV);
-        } else if (processor < gpu::Processor::ThreadX) {
-          Value loopOpLB, loopOpUB, loopOpStep;
-          if (processor == gpu::Processor::WarpY) {
-            // SmallVector<Value, 4> loopSteps(parallelOp.step());
-            // warpMtile = loopSteps[0];
-            // warpNtile = loopSteps[1];
-
-            Value divNtileByWarpNtile =
-                rewriter.create<UnsignedDivIOp>(loc, nTile, warpNtile);
-            Value cmpResult = rewriter.create<CmpIOp>(
-                loc, CmpIPredicate::ule, numWarps, divNtileByWarpNtile);
-
-            numWarpsInN = rewriter.create<SelectOp>(loc, cmpResult, numWarps,
-                                                    divNtileByWarpNtile);
-            numWarpsInM =
-                rewriter.create<UnsignedDivIOp>(loc, numWarps, numWarpsInN);
-
-            warpIdX =
-                rewriter.create<UnsignedRemIOp>(loc, linearWarpId, numWarpsInN);
-            warpIdY =
-                rewriter.create<UnsignedDivIOp>(loc, linearWarpId, numWarpsInN);
-
-            loopOpLB = rewriter.create<MulIOp>(loc, warpIdY, warpMtile);
-            loopOpUB = mTile;
-            loopOpStep = rewriter.create<MulIOp>(loc, warpMtile, numWarpsInM);
-
-          } else if (processor == gpu::Processor::WarpX) {
-
-            loopOpLB = rewriter.create<MulIOp>(loc, warpIdX, warpNtile);
-            loopOpUB = nTile;
-            loopOpStep = rewriter.create<MulIOp>(loc, warpNtile, numWarpsInN);
-          }
-
-          ForOp loopOp =
-              rewriter.create<ForOp>(loc, loopOpLB, loopOpUB, loopOpStep);
-          Value newIndex = loopOp.getInductionVar();
-          rewriter.setInsertionPointToStart(loopOp.getBody());
-          // Put a sentinel into the worklist so we know when to pop out of the
-          // loop body again. We use the launchOp here, as that cannot be part
-          // of the bodies instruction.
-          worklist.push_back(launchOp.getOperation());
-          cloningMap.map(iv, newIndex);
-        } else {
+        } else if (processor < gpu::Processor::WarpX) {
           // The parallel op is mapped to threads. For now distribute this
           // cyclically among the threads in a thread block. In a cyclic
           // distribution the lower bound of the loop is equal to the thread id
@@ -383,11 +334,42 @@ LogicalResult convertParallelLoop(gpu::LaunchOp launchOp, ParallelOp parallelOp,
           // of the bodies instruction.
           worklist.push_back(launchOp.getOperation());
           cloningMap.map(iv, newIndex);
+        } else {
+          Value loopOpLB, loopOpUB, loopOpStep;
+          if (processor == gpu::Processor::WarpY) {
+            Value divNtileByWarpNtile =
+                rewriter.create<UnsignedDivIOp>(loc, nTile, warpNtile);
+            Value cmpResult = rewriter.create<CmpIOp>(
+                loc, CmpIPredicate::ule, numWarps, divNtileByWarpNtile);
+            numWarpsInN = rewriter.create<SelectOp>(loc, cmpResult, numWarps,
+                                                    divNtileByWarpNtile);
+            numWarpsInM =
+                rewriter.create<UnsignedDivIOp>(loc, numWarps, numWarpsInN);
+            warpIdX =
+                rewriter.create<UnsignedRemIOp>(loc, linearWarpId, numWarpsInN);
+            warpIdY =
+                rewriter.create<UnsignedDivIOp>(loc, linearWarpId, numWarpsInN);
+            loopOpLB = rewriter.create<MulIOp>(loc, warpIdY, warpMtile);
+            loopOpUB = mTile;
+            loopOpStep = rewriter.create<MulIOp>(loc, warpMtile, numWarpsInM);
+          } else if (processor == gpu::Processor::WarpX) {
+            loopOpLB = rewriter.create<MulIOp>(loc, warpIdX, warpNtile);
+            loopOpUB = nTile;
+            loopOpStep = rewriter.create<MulIOp>(loc, warpNtile, numWarpsInN);
+          }
+          ForOp loopOp =
+              rewriter.create<ForOp>(loc, loopOpLB, loopOpUB, loopOpStep);
+          Value newIndex = loopOp.getInductionVar();
+          rewriter.setInsertionPointToStart(loopOp.getBody());
+          // Put a sentinel into the worklist so we know when to pop out of the
+          // loop body again. We use the launchOp here, as that cannot be part
+          // of the bodies instruction.
+          worklist.push_back(launchOp.getOperation());
+          cloningMap.map(iv, newIndex);
         }
       }
     }
   }
-
   Block *body = parallelOp.getBody();
   worklist.reserve(worklist.size() + body->getOperations().size());
   for (Operation &op : llvm::reverse(body->without_terminator())) {
@@ -404,8 +386,7 @@ static void doPreComputationStuff(gpu::LaunchOp gpuLaunchOp,
   assert(parallelOp.getNumLoops() >= 2 && "expected atleast a 2-d loop nest");
   Location loc = parallelOp.getLoc();
 
-  // Find linear thread id.
-  // Insert ops for calculating the linear thread Id.
+  // Find linear thread id and insert ops for calculating the linear thread Id.
   Value xdimYdim = rewriter.create<MulIOp>(loc, gpuLaunchOp.blockSizeX(),
                                            gpuLaunchOp.blockSizeY());
   Value zIdXdimYdim =
@@ -415,18 +396,14 @@ static void doPreComputationStuff(gpu::LaunchOp gpuLaunchOp,
   Value linearTidYZ = rewriter.create<AddIOp>(loc, zIdXdimYdim, yIdXdim);
   linearTidXYZ =
       rewriter.create<AddIOp>(loc, linearTidYZ, gpuLaunchOp.getThreadIds().x);
-
-  // numThreadsXYZ = rewriter.create<MulIOp>(loc, xdimYdim,
-  // gpuLaunchOp.blockSizeZ());
-
   Value constantWarpSize = rewriter.create<ConstantIndexOp>(loc, warpSize);
   linearWarpId =
       rewriter.create<UnsignedDivIOp>(loc, linearTidXYZ, constantWarpSize);
-
   numWarps =
       rewriter.create<UnsignedDivIOp>(loc, numThreadsXYZ, constantWarpSize);
 }
 
+/// Compute total number of threads.
 static void computeNumThreads(Location loc, PatternRewriter &rewriter) {
   Value mbywarpM = rewriter.create<UnsignedDivIOp>(loc, mTile, warpMtile);
   Value nbywarpN = rewriter.create<UnsignedDivIOp>(loc, nTile, warpNtile);
@@ -436,29 +413,26 @@ static void computeNumThreads(Location loc, PatternRewriter &rewriter) {
       rewriter.create<MulIOp>(loc, mbyWMintonbyWN, constantWarpSize);
 }
 
+/// Finds tile sizes.
 static void findTileSizes(ParallelOp parallelOp) {
   ParallelOp warpLoop;
   parallelOp.walk([&](ParallelOp op) {
-    if ((!op->getAttrOfType<BoolAttr>("isCopyLoopNest")) &&
-        (op.getNumLoops() == 2) && op != parallelOp) {
+    if (op.getNumLoops() == 2 && op != parallelOp) {
       ArrayAttr mapping =
           op->getAttrOfType<ArrayAttr>(gpu::getMappingAttrName());
       for (auto attr : mapping) {
         auto annotation = attr.dyn_cast<gpu::ParallelLoopDimMapping>();
-        if ((gpu::getProcessor(annotation) > gpu::Processor::BlockZ) &&
-            (gpu::getProcessor(annotation) < gpu::Processor::ThreadX)) {
+        if ((gpu::getProcessor(annotation) > gpu::Processor::ThreadZ) &&
+            (gpu::getProcessor(annotation) < gpu::Processor::Sequential)) {
           warpLoop = op;
           return;
         }
       }
     }
   });
-
   assert(warpLoop.getNumLoops() == 2 && "Not a 2-d warp loop");
-
   SmallVector<Value, 2> threadBlockLoopSteps(parallelOp.step());
   SmallVector<Value, 2> warpLoopSteps(warpLoop.step());
-
   mTile = threadBlockLoopSteps[0];
   nTile = threadBlockLoopSteps[1];
   warpMtile = warpLoopSteps[0];
@@ -537,13 +511,13 @@ LoopsToGpuLowering::matchAndRewrite(ParallelOp parallelOp,
   return success();
 }
 
-void populateConvertSCFToGPUPatterns(OwningRewritePatternList &patterns,
-                                     MLIRContext *ctx,
-                                     ArrayRef<int64_t> tbDims) {
+static void populateConvertSCFToGPUPatterns(OwningRewritePatternList &patterns,
+                                            MLIRContext *ctx,
+                                            ArrayRef<int64_t> tbDims) {
   patterns.insert<LoopsToGpuLowering>(ctx, tbDims);
 }
 
-void TestConvertSCFToGPUPass::filltbDims() {
+void TestConvertMatmulParallelLoopsToGPUPass::filltbDims() {
   for (int i = 0, e = tbDimsRef.size(); i < 3; ++i) {
     if (i < e)
       tbDims.push_back(tbDimsRef[i]);
@@ -552,7 +526,7 @@ void TestConvertSCFToGPUPass::filltbDims() {
   }
 }
 
-void TestConvertSCFToGPUPass::runOnOperation() {
+void TestConvertMatmulParallelLoopsToGPUPass::runOnOperation() {
   warpSize = warpSizeRef;
   filltbDims();
   OwningRewritePatternList patterns(&getContext());
@@ -562,6 +536,7 @@ void TestConvertSCFToGPUPass::runOnOperation() {
   target.addLegalDialect<AffineDialect>();
   target.addLegalDialect<gpu::GPUDialect>();
   target.addLegalDialect<scf::SCFDialect>();
+  target.addLegalDialect<memref::MemRefDialect>();
   target.addIllegalOp<scf::ParallelOp>();
   if (failed(
           applyPartialConversion(getOperation(), target, std::move(patterns))))
@@ -569,8 +544,8 @@ void TestConvertSCFToGPUPass::runOnOperation() {
 }
 
 namespace mlir {
-void registerTestConvertSCFToGPUPass() {
-  PassRegistration<TestConvertSCFToGPUPass>("test-convert-scf-to-gpu",
-                                            "Convert SCF to GPU");
+void registerTestConvertMatmulParallelLoopsToGPUPass() {
+  PassRegistration<TestConvertMatmulParallelLoopsToGPUPass>(
+      "test-convert-matmul-parallel-loops-to-gpu", "Convert SCF to GPU");
 }
 } // namespace mlir
