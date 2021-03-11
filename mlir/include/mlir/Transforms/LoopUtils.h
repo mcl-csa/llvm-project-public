@@ -184,9 +184,9 @@ struct AffineCopyOptions {
   AffineMap fastBufferLayout = AffineMap();
   // Fast buffer placement block.
   Block *fastBufferPlacementBlock = nullptr;
-  // True if allocation is on heap.
+  // True if stack allocation has to be done.
   bool useStackAllocation = false;
-  // True if global memref has to be created.
+  // True if global memref has to be created for allocation.
   bool useGlobalAllocation = false;
   // Name of global memref to be created.
   std::string globalMemrefName;
