@@ -1,6 +1,7 @@
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/Transforms/LoopUtils.h"
+#include "llvm/Support/CommandLine.h"
 using namespace mlir;
 
 #define DEBUG_TYPE "test-gpu-matmul-fast-buffer-placement"
@@ -16,20 +17,33 @@ namespace {
 struct TestGpuMatmulFastBufferPlacement
     : public PassWrapper<TestGpuMatmulFastBufferPlacement, FunctionPass> {
   TestGpuMatmulFastBufferPlacement() = default;
-  TestGpuMatmulFastBufferPlacement(const TestGpuMatmulFastBufferPlacement &pass) {}
+  TestGpuMatmulFastBufferPlacement(
+      const TestGpuMatmulFastBufferPlacement &pass) {}
   void runOnFunction() override;
   ListOption<std::string> matrices{
       *this, "matrices", llvm::cl::MiscFlags::CommaSeparated,
-      llvm::cl::desc("Specifies which matrices to place in GPU Buffer.")};
+      llvm::cl::desc("Specifies which matrices to place in the GPU Buffer.")};
+  Option<bool> stackAllocation{
+      *this, "stack-allocation",
+      llvm::cl::desc(
+          "Specifies whether to allocate buffers in the stack or not."),
+      llvm::cl::init(false)};
+  Option<bool> globalAllocation{
+      *this, "global-allocation",
+      llvm::cl::desc(
+          "Specifies whether to allocate buffers as the global memref or not."),
+      llvm::cl::init(false)};
 };
 // It contains matrices name that has to be placed in fast buffer.
 SmallVector<std::string, 3> matricesToPlace;
+bool useStackAllocation;
+bool useGlobalAllocation;
 } // end anonymous namespace
 
 /// Creates fast buffers (in memory space == 3) and places the specified
 /// matrices into them.
 static void createAndPlaceFastBuffers(AffineForOp rootForOp,
-                                        OpBuilder opBuilder) {
+                                      OpBuilder opBuilder) {
   SmallVector<AffineForOp, 6> loopNest;
   getPerfectlyNestedLoops(loopNest, rootForOp);
 
@@ -59,8 +73,8 @@ static void createAndPlaceFastBuffers(AffineForOp rootForOp,
       /*fastMemCapacityBytes=*/UINT_MAX,
       /*fastBufferLayout*/ AffineMap(),
       /*fastBufferPlacementBlock*/ loopNest[1].getBody(),
-      /*useHeapAllocation*/ false,
-      /*useGlobalAllocation*/ false,
+      /*useStackAllocation*/ useStackAllocation,
+      /*useGlobalAllocation*/ useGlobalAllocation,
       /*globalMemrefName*/ "global_mem"};
 
   // It contains loop nests which copies data from gpu's slow memory into
@@ -115,6 +129,9 @@ static void runOnBlock(Block &block) {
 
 void TestGpuMatmulFastBufferPlacement::runOnFunction() {
   FuncOp funcOp = getFunction();
+
+  useStackAllocation = stackAllocation;
+  useGlobalAllocation = globalAllocation;
 
   for (auto mat : matrices)
     // This condition ensures that only those matrices are placed in fast

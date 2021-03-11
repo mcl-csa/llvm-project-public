@@ -2634,9 +2634,10 @@ static LogicalResult generateCopy(
       // is specified.
       OpBuilder fastBuffBuilder(copyOptions.fastBufferPlacementBlock,
                                 copyOptions.fastBufferPlacementBlock->begin());
-      if (copyOptions.useHeapAllocation)
+      if (copyOptions.useStackAllocation)
+        // if the stack allocation has to be done.
         fastMemRef =
-            fastBuffBuilder.create<memref::AllocOp>(loc, fastMemRefType)
+            fastBuffBuilder.create<memref::AllocaOp>(loc, fastMemRefType)
                 .getResult();
       else if (copyOptions.useGlobalAllocation) {
         // True if global allocation has to be done. For this, first we create
@@ -2655,14 +2656,16 @@ static LogicalResult generateCopy(
         fastMemRef = fastBuffBuilder.create<memref::GetGlobalOp>(
             loc, fastMemRefType, global.getName());
       } else
-        // if the stack allocation has to be done.
+        // if not stack or global allocation then the heap allocation has to be
+        // done.
         fastMemRef =
-            fastBuffBuilder.create<memref::AllocaOp>(loc, fastMemRefType)
+            fastBuffBuilder.create<memref::AllocOp>(loc, fastMemRefType)
                 .getResult();
     } else {
-      if (copyOptions.useHeapAllocation)
+      if (copyOptions.useStackAllocation)
+        // if the stack allocation has to be done.
         fastMemRef =
-            prologue.create<memref::AllocOp>(loc, fastMemRefType).getResult();
+            prologue.create<memref::AllocaOp>(loc, fastMemRefType).getResult();
       else if (copyOptions.useGlobalAllocation) {
         // True if global allocation has to be done. For this, first we create
         // a global memref op and then create get global memref op that gives
@@ -2683,9 +2686,10 @@ static LogicalResult generateCopy(
         fastMemRef = prologue.create<memref::GetGlobalOp>(
             loc, fastMemRefType, globalMemrefOp.getName());
       } else
-        // if the stack allocation has to be done.
+        // if not stack or global allocation then the heap allocation has to be
+        // done.
         fastMemRef =
-            prologue.create<memref::AllocaOp>(loc, fastMemRefType).getResult();
+            prologue.create<memref::AllocOp>(loc, fastMemRefType).getResult();
     }
 
     // Record it.
@@ -2793,7 +2797,8 @@ static LogicalResult generateCopy(
   }
 
   // Generate dealloc for the buffer only if buffer is allocated in heap.
-  if (!existingBuf && copyOptions.useHeapAllocation) {
+  if (!existingBuf && !copyOptions.useStackAllocation &&
+      !copyOptions.useGlobalAllocation) {
     auto bufDeallocOp = epilogue.create<memref::DeallocOp>(loc, fastMemRef);
     // When generating pointwise copies, `nEnd' has to be set to deallocOp on
     // the fast buffer (since it marks the new end insertion point).

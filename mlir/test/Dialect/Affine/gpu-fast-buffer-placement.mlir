@@ -1,4 +1,6 @@
-// RUN: mlir-opt %s -test-gpu-matmul-fast-buffer-placement -canonicalize | FileCheck %s
+// RUN: mlir-opt %s -test-gpu-matmul-fast-buffer-placement='stack-allocation=true' -canonicalize | FileCheck %s
+
+// For buffer allocation to be done as global memref use global-allocation option.
 
 // Which matrices to place can be specified by -test-gpu-fast-buffer-placement='matrices=str'
 // where str = A/B/C/A,B/A,C/B,C/A,B,C. Any of the following options can be used.

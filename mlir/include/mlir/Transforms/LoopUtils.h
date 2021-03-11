@@ -185,7 +185,7 @@ struct AffineCopyOptions {
   // Fast buffer placement block.
   Block *fastBufferPlacementBlock = nullptr;
   // True if allocation is on heap.
-  bool useHeapAllocation = true;
+  bool useStackAllocation = false;
   // True if global memref has to be created.
   bool useGlobalAllocation = false;
   // Name of global memref to be created.
@@ -256,8 +256,9 @@ void coalesceLoops(MutableArrayRef<scf::ForOp> loops);
 /// Take the ParallelLoop and for each set of dimension indices, combine them
 /// into a single dimension. combinedDimensions must contain each index into
 /// loops exactly once.
-scf::ParallelOp collapseParallelLoops(scf::ParallelOp loops,
-                           ArrayRef<std::vector<unsigned>> combinedDimensions);
+scf::ParallelOp
+collapseParallelLoops(scf::ParallelOp loops,
+                      ArrayRef<std::vector<unsigned>> combinedDimensions);
 
 /// Maps `forOp` for execution on a parallel grid of virtual `processorIds` of
 /// size given by `numProcessors`. This is achieved by embedding the SSA values
