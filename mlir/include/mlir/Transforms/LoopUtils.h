@@ -167,28 +167,28 @@ Loops tilePerfectlyNested(scf::ForOp rootForOp, ArrayRef<Value> sizes);
 
 /// Explicit copy / DMA generation options for mlir::affineDataCopyGenerate.
 struct AffineCopyOptions {
-  // True if DMAs should be generated instead of point-wise copies.
+  /// True if DMAs should be generated instead of point-wise copies.
   bool generateDma;
-  // The slower memory space from which data is to be moved.
+  /// The slower memory space from which data is to be moved.
   unsigned slowMemorySpace;
-  // Memory space of the faster one (typically a scratchpad).
+  /// Memory space of the faster one (typically a scratchpad).
   unsigned fastMemorySpace;
-  // Memory space to place tags in: only meaningful for DMAs.
+  /// Memory space to place tags in: only meaningful for DMAs.
   unsigned tagMemorySpace;
-  // Capacity of the fast memory space in bytes.
+  /// Capacity of the fast memory space in bytes.
   uint64_t fastMemCapacityBytes;
-  // Fast buffer data layout remap (for pointwise copying only, i.e., with
-  // generateDma = false). If specified, indices are remapped using it to
-  // generate new indices, effectively enforcing a new layout; row major
-  // layout is used if left unspecified.
+  /// Fast buffer data layout remap (for pointwise copying only, i.e., with
+  /// generateDma = false). If specified, indices are remapped using it to
+  /// generate new indices, effectively enforcing a new layout; row major
+  /// layout is used if left unspecified.
   AffineMap fastBufferLayout = AffineMap();
-  // Fast buffer placement block.
+  /// Fast buffer placement block.
   Block *fastBufferPlacementBlock = nullptr;
-  // True if stack allocation has to be done.
+  /// True if the stack allocation has to be done.
   bool useStackAllocation = false;
-  // True if global memref has to be created for allocation.
+  /// True if the global memref has to be created for allocation.
   bool useGlobalAllocation = false;
-  // Name of global memref to be created.
+  /// Name of the global memref to be created.
   std::string globalMemrefName;
 };
 
