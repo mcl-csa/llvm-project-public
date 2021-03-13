@@ -40,6 +40,7 @@ void registerTestAffineDataCopyPass();
 void registerTestAffineLoopUnswitchingPass();
 void registerTestAllReduceLoweringPass();
 void registerTestFunc();
+void registerTestGpuMarkGlobalAsWorkgroupMemoryPass();
 void registerTestGpuMatmulFastBufferPlacementPass();
 void registerTestGpuMemoryPromotionPass();
 void registerTestGpuMatmulParallelLoopMappingPass();
@@ -123,6 +124,7 @@ void registerTestPasses() {
   registerTestAllReduceLoweringPass();
   registerTestFunc();
   registerTestGpuMemoryPromotionPass();
+  registerTestGpuMarkGlobalAsWorkgroupMemoryPass();
   registerTestGpuMatmulParallelLoopMappingPass();
   registerTestConvertMatmulParallelLoopsToGPUPass();
   registerTestLoopPermutationPass();
