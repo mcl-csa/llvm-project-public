@@ -88,7 +88,8 @@ static void adjustToDivisorsOfTripCounts(ArrayRef<AffineForOp> band,
 // based on a simple model that looks at the memory footprint and determines
 // tile sizes assuming identity accesses / 1:1 tile size proportional footprint
 // along each of the dimensions being tiled. Second argument `curTilingLevel`[0,
-// numTilingLevels - 1] represents the tiling level for which this method is called.
+// numTilingLevels - 1] represents the tiling level for which this method is
+// called.
 // TODO: evolve this model. Tile size determination is a large area
 // to play with in general.
 void LoopTiling::getTileSizes(ArrayRef<AffineForOp> band,
@@ -97,8 +98,8 @@ void LoopTiling::getTileSizes(ArrayRef<AffineForOp> band,
   if (band.empty())
     return;
 
-  // Use command-line tileSize if specified. The tile size for each level is scaled down
-  // by a factor equal to the tile size of the previous level.
+  // Use command-line tileSize if specified. Scale Down the tileSizes for each
+  // level by a factor equal to the tilingLevel.
   if (tileSize) {
     tileSizes->assign(
         band.size(),
@@ -108,12 +109,20 @@ void LoopTiling::getTileSizes(ArrayRef<AffineForOp> band,
 
   // Use tileSizes and fill them with default tile size if it's short.
   if (!this->tileSizes.empty()) {
-    tileSizes->assign(this->tileSizes.begin(), this->tileSizes.end());
+    // Fill in with the tile sizes supplied.
+    if (this->tileSizes.size() > (tilingLevelIndex * band.size())) {
+      for (unsigned i = tilingLevelIndex * band.size(),
+                    e = this->tileSizes.size();
+           i < e; ++i) {
+        tileSizes->push_back(this->tileSizes[i]);
+      }
+    }
+    // If sufficient tile sizes were provided then return.
+    if (tileSizes->size() == band.size())
+      return;
+
+    // Fill the remaining places with default tile size.
     tileSizes->resize(band.size(), kDefaultTileSize);
-    // Divide the tile sizes with the tiling level to make them different.
-    for (unsigned i = 0, e = tileSizes->size(); i < e; ++i)
-      (*tileSizes)[i] =
-          std::max(1U, static_cast<unsigned>((*tileSizes)[i] / (tilingLevelIndex + 1)));
     return;
   }
   tileSizes->resize(band.size());
@@ -207,7 +216,7 @@ void LoopTiling::runOnFunction() {
                     tiledNest.end());
       }
       if (failed(tilePerfectlyNested(band, tileSizes, &tiledNest,
-                               this->hasToDoRelativeIndexing)))
+                                     this->hasToDoRelativeIndexing)))
         return signalPassFailure();
       // Separate full and partial tiles. Separation only supported at the last
       // level of tiling.
