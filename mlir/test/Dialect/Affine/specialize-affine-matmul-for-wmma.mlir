@@ -63,6 +63,7 @@ module  {
 // CHECK-NEXT:     %2 = memref.alloc() : memref<1024x1024xf16>
 // CHECK-NEXT:     affine.for %arg0 = 0 to 1024 step 64 {
 // CHECK-NEXT:       affine.for %arg1 = 0 to 1024 step 64 {
+// CHECK-NEXT:         gpu.barrier
 // CHECK-NEXT:         %3 = memref.alloca() : memref<64x64xf16, 3>
 // CHECK-NEXT:         %4 = memref.alloca() : memref<64x64xf16, 3>
 // CHECK-NEXT:         affine.parallel (%arg2) = (0) to (64) step (32) {
@@ -80,18 +81,21 @@ module  {
 // CHECK-NEXT:             %15 = affine.apply #map1(%arg1, %arg3)
 // CHECK-NEXT:             %16 = gpu.subgroup_mma_load_matrix %2[%14, %15] {leadDimension = 1024 : index} : memref<1024x1024xf16> -> !gpu.mma_matrix<16x16xf16, "COp">
 // CHECK-NEXT:             %17:4 = affine.for %arg4 = 0 to 1024 step 64 iter_args(%arg5 = %7, %arg6 = %10, %arg7 = %13, %arg8 = %16) -> (!gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">) {
+// CHECK-NEXT:               gpu.barrier 
 // CHECK-NEXT:               affine.parallel (%arg9) = (%arg4) to (%arg4 + 64) {
 // CHECK-NEXT:                 affine.parallel (%arg10) = (%arg1) to (%arg1 + 64) {
 // CHECK-NEXT:                   %19 = affine.load %1[%arg9, %arg10] : memref<1024x1024xf16>
 // CHECK-NEXT:                   affine.store %19, %3[-%arg4 + %arg9, -%arg1 + %arg10] : memref<64x64xf16, 3>
 // CHECK-NEXT:                 }
 // CHECK-NEXT:               }
+// CHECK-NEXT:               gpu.barrier 
 // CHECK-NEXT:               affine.parallel (%arg9) = (%arg0) to (%arg0 + 64) {
 // CHECK-NEXT:                 affine.parallel (%arg10) = (%arg4) to (%arg4 + 64) {
 // CHECK-NEXT:                   %19 = affine.load %0[%arg9, %arg10] : memref<1024x1024xf16>
 // CHECK-NEXT:                   affine.store %19, %4[-%arg0 + %arg9, -%arg4 + %arg10] : memref<64x64xf16, 3>
 // CHECK-NEXT:                 }
 // CHECK-NEXT:               }
+// CHECK-NEXT:               gpu.barrier 
 // CHECK-NEXT:               %18:4 = affine.for %arg9 = 0 to 64 step 16 iter_args(%arg10 = %arg5, %arg11 = %arg6, %arg12 = %arg7, %arg13 = %arg8) -> (!gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">) {
 // CHECK-NEXT:                 %19 = gpu.subgroup_mma_load_matrix %4[%arg2, %arg9] {leadDimension = 64 : index} : memref<64x64xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
 // CHECK-NEXT:                 %20 = gpu.subgroup_mma_load_matrix %3[%arg9, %arg3] {leadDimension = 64 : index} : memref<64x64xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
