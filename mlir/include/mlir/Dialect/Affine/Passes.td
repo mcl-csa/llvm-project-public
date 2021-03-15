@@ -64,7 +64,7 @@ def AffineLoopTiling : FunctionPass<"affine-loop-tile"> {
     ListOption<"tileSizes", "tile-sizes", "unsigned",
                "List of tile sizes for each perfect nest "
                "(overridden by -tile-size)",
-               "llvm::cl::ZeroOrMore">,
+               "llvm::cl::ZeroOrMore, llvm::cl::CommaSeparated">,
     Option<"hasToDoRelativeIndexing", "relative-indexing", "bool",
            /*default=*/"false",
            "Specifies whether to do absolute indexing or relative indexing">,
