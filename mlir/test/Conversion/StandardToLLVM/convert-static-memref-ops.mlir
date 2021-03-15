@@ -230,6 +230,34 @@ func @static_dealloc(%static: memref<10x8xf32>) {
 
 // -----
 
+// CHECK-LABEL: func @memref_vector_cast
+func @memref_vector_cast(%M : memref<42x16xf32>) -> memref<42x4xvector<4xf32>> {
+// CHECK:        %[[SRC:.*]] = llvm.insertvalue %{{.*}}, %{{.*}}[4, 1]
+// CHECK-NEXT:   llvm.mlir.undef : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   llvm.extractvalue %{{.*}}[0] : !llvm.struct<(ptr<f32>, ptr<f32>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   llvm.bitcast %{{.*}} : !llvm.ptr<f32> to !llvm.ptr<vector<4xf32>>
+// CHECK-NEXT:   llvm.insertvalue %{{.*}}, %{{.*}}[0] : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   llvm.extractvalue %{{.*}}[1] : !llvm.struct<(ptr<f32>, ptr<f32>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   llvm.bitcast %{{.*}} : !llvm.ptr<f32> to !llvm.ptr<vector<4xf32>>
+// CHECK-NEXT:   llvm.insertvalue %{{.*}}, %{{.*}}[1] : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   %{{.*}} = llvm.mlir.constant(0 : index) : i64
+// CHECK-NEXT:   %{{.*}} = llvm.insertvalue %{{.*}}, %{{.*}}[2] : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   %[[size1:.*]] = llvm.mlir.constant(42 : index) : i64
+// CHECK-NEXT:   %[[size2:.*]] = llvm.mlir.constant(4 : index) : i64
+// CHECK-NEXT:   %[[cumul_size:.*]] = llvm.mul %[[size1]], %[[size2]]
+// CHECK-NEXT:   %[[st2:.*]] = llvm.mlir.constant(1 : index)
+// CHECK-NEXT:   %[[st1:.*]] = llvm.mlir.constant(4 : index)
+// CHECK-NEXT:   llvm.insertvalue %[[size1]], %{{.*}}[3, 0] : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   llvm.insertvalue %[[st1]], %{{.*}}[4, 0] : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   llvm.insertvalue %[[size2]], %{{.*}}[3, 1] : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   llvm.insertvalue %[[st2]], %{{.*}}[4, 1] : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+// CHECK-NEXT:   llvm.return %{{.*}} : !llvm.struct<(ptr<vector<4xf32>>, ptr<vector<4xf32>>, i64, array<2 x i64>, array<2 x i64>)>
+  %MV = memref_vector_cast %M : memref<42x16xf32> to memref<42x4xvector<4xf32>>
+  return %MV : memref<42x4xvector<4xf32>>
+}
+
+// -----
+
 // CHECK-LABEL: func @zero_d_load
 // BAREPTR-LABEL: func @zero_d_load(%{{.*}}: !llvm.ptr<f32>) -> f32
 func @zero_d_load(%arg0: memref<f32>) -> f32 {

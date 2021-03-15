@@ -2533,6 +2533,116 @@ struct MemRefCastOpLowering : public ConvertOpToLLVMPattern<memref::CastOp> {
   }
 };
 
+struct MemRefVectorCastOpLowering
+    : public ConvertOpToLLVMPattern<MemRefVectorCastOp> {
+  using ConvertOpToLLVMPattern<MemRefVectorCastOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(MemRefVectorCastOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    MemRefType sourceType = op.getOperand().getType().cast<MemRefType>();
+    MemRefType targetType = op.getType();
+
+    MemRefVectorCastOp::Adaptor transformed(operands);
+    MemRefDescriptor srcMemRefDesc(transformed.source());
+
+    Type targetStructType = typeConverter->convertType(op.getType());
+    if (!targetStructType)
+      return failure();
+    Location loc = op->getLoc();
+    MemRefDescriptor memRefDescriptor =
+        MemRefDescriptor::undef(rewriter, loc, targetStructType);
+    Type targetElementPtrType = memRefDescriptor.getElementPtrType();
+
+    Value srcBuffer = srcMemRefDesc.allocatedPtr(rewriter, loc);
+    Value targetBuffer = rewriter.create<LLVM::BitcastOp>(
+        loc, targetElementPtrType, ArrayRef<Value>(srcBuffer));
+    memRefDescriptor.setAllocatedPtr(rewriter, loc, targetBuffer);
+
+    Value srcBufferAligned = srcMemRefDesc.alignedPtr(rewriter, loc);
+    Value targetBufAligned = rewriter.create<LLVM::BitcastOp>(
+        loc, targetElementPtrType, ArrayRef<Value>(srcBufferAligned));
+    memRefDescriptor.setAlignedPtr(rewriter, loc, targetBufAligned);
+
+    int64_t offset;
+    SmallVector<int64_t, 4> strides;
+    if (failed(getStridesAndOffset(targetType, strides, offset)))
+      return failure();
+
+    // Unhandled dynamic offset.
+    if (offset == MemRefType::getDynamicStrideOrOffset())
+      return failure();
+
+    memRefDescriptor.setOffset(rewriter, loc,
+                               createIndexConstant(rewriter, loc, offset));
+
+    // Get the sizes of the memref: all but the last one are copied from the
+    // source memref. If the dimension size was static, the target memref would
+    // have the same size.
+    SmallVector<Value, 4> sizes;
+    sizes.reserve(targetType.getRank());
+    for (unsigned pos = 0, e = targetType.getRank() - 1; pos < e; ++pos) {
+      int64_t dimSize = targetType.getDimSize(pos);
+      if (dimSize == MemRefType::kDynamicSize)
+        sizes.push_back(srcMemRefDesc.size(rewriter, loc, pos));
+      else
+        sizes.push_back(createIndexConstant(rewriter, loc, dimSize));
+    }
+
+    if (targetType.getShape().back() != MemRefType::kDynamicSize) {
+      // The op is already verified to have the right size for the last
+      // dimension.
+      sizes.push_back(
+          createIndexConstant(rewriter, loc, targetType.getShape().back()));
+    } else {
+      // We need to divide the dynamic size on the source by the vector width.
+      Value vecWidth = createIndexConstant(
+          rewriter, loc,
+          targetType.getElementType().cast<ShapedType>().getNumElements());
+      sizes.push_back(rewriter.create<LLVM::UDivOp>(
+          loc, srcMemRefDesc.size(rewriter, loc, sourceType.getRank() - 1),
+          vecWidth));
+    }
+
+    assert(!sizes.empty() && "target memref rank can't be zero");
+
+    // Compute the total number of memref elements.
+    Value cumulativeSize = sizes.front();
+    for (unsigned i = 1, e = sizes.size(); i < e; ++i)
+      cumulativeSize = rewriter.create<LLVM::MulOp>(
+          loc, getIndexType(), ArrayRef<Value>{cumulativeSize, sizes[i]});
+
+    // Calculate the strides.
+    Value runningStride = nullptr;
+    // Iterate strides in reverse order, compute runningStride and strideValues.
+    unsigned nStrides = strides.size();
+    SmallVector<Value, 4> strideValues(nStrides, nullptr);
+    for (auto indexedStride : llvm::enumerate(llvm::reverse(strides))) {
+      int64_t index = nStrides - 1 - indexedStride.index();
+      if (strides[index] == MemRefType::getDynamicStrideOrOffset())
+        // Identity layout map is enforced in the match function, so we compute:
+        //   `runningStride *= sizes[index + 1]`.
+        runningStride = runningStride
+                            ? rewriter.create<LLVM::MulOp>(loc, runningStride,
+                                                           sizes[index + 1])
+                            : createIndexConstant(rewriter, loc, 1);
+      else
+        runningStride = createIndexConstant(rewriter, loc, strides[index]);
+      strideValues[index] = runningStride;
+    }
+
+    // Fill size and stride descriptors in memref.
+    for (auto indexedSize : llvm::enumerate(sizes)) {
+      int64_t index = indexedSize.index();
+      memRefDescriptor.setSize(rewriter, loc, index, indexedSize.value());
+      memRefDescriptor.setStride(rewriter, loc, index, strideValues[index]);
+    }
+
+    rewriter.replaceOp(op, {memRefDescriptor});
+    return success();
+  }
+};
+
 /// Extracts allocated, aligned pointers and offset from a ranked or unranked
 /// memref type. In unranked case, the fields are extracted from the underlying
 /// ranked descriptor.
@@ -3930,6 +4040,7 @@ void mlir::populateStdToLLVMMemoryConversionPatterns(
       MemRefCastOpLowering,
       MemRefReinterpretCastOpLowering,
       MemRefReshapeOpLowering,
+      MemRefVectorCastOpLowering,
       RankOpLowering,
       StoreOpLowering,
       SubViewOpLowering,
