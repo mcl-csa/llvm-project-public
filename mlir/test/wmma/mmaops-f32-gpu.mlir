@@ -15,13 +15,13 @@ module  {
     %c2 = constant 2 : index
     %0 = alloc() : memref<1024x1024xf16>
     %1 = alloc() : memref<1024x1024xf16>
-    %2 = alloc() : memref<1024x1024xf16>
+    %2 = alloc() : memref<1024x1024xf32>
     %3 = memref_cast %0 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %3 : memref<*xf16>
     %4 = memref_cast %1 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %4 : memref<*xf16>
-    %5 = memref_cast %2 : memref<1024x1024xf16> to memref<*xf16>
-    gpu.host_register %5 : memref<*xf16>
+    %5 = memref_cast %2 : memref<1024x1024xf32> to memref<*xf32>
+    gpu.host_register %5 : memref<*xf32>
     gpu.launch blocks(%arg0, %arg1, %arg2) in (%arg6 = %c16, %arg7 = %c16, %arg8 = %c1) threads(%arg3, %arg4, %arg5) in (%arg9 = %c128, %arg10 = %c1, %arg11 = %c1) {
       %6 = muli %arg5, %c128 : index
       %7 = muli %arg4, %c128 : index
@@ -40,20 +40,20 @@ module  {
         scf.for %arg13 = %18 to %c64 step %c64 {
           %19 = addi %11, %arg12 : index
           %20 = addi %12, %arg13 : index
-          %21 = gpu.subgroup_mma_load_matrix %2[%19, %20] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf16> -> !gpu.mmafragment<8, f32>
+          %21 = gpu.subgroup_mma_load_matrix %2[%19, %20] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf32> -> !gpu.mmafragment<8, f32>
           %22 = addi %11, %arg12 : index
           %23 = addi %22, %c16 : index
           %24 = addi %12, %arg13 : index
-          %25 = gpu.subgroup_mma_load_matrix %2[%23, %24] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf16> -> !gpu.mmafragment<8, f32>
+          %25 = gpu.subgroup_mma_load_matrix %2[%23, %24] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf32> -> !gpu.mmafragment<8, f32>
           %26 = addi %11, %arg12 : index
           %27 = addi %12, %arg13 : index
           %28 = addi %27, %c16 : index
-          %29 = gpu.subgroup_mma_load_matrix %2[%26, %28] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf16> -> !gpu.mmafragment<8, f32>
+          %29 = gpu.subgroup_mma_load_matrix %2[%26, %28] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf32> -> !gpu.mmafragment<8, f32>
           %30 = addi %11, %arg12 : index
           %31 = addi %30, %c16 : index
           %32 = addi %12, %arg13 : index
           %33 = addi %32, %c16 : index
-          %34 = gpu.subgroup_mma_load_matrix %2[%31, %33] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf16> -> !gpu.mmafragment<8, f32>
+          %34 = gpu.subgroup_mma_load_matrix %2[%31, %33] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf32> -> !gpu.mmafragment<8, f32>
           %35:4 = scf.for %arg14 = %c0 to %c1024 step %c64 iter_args(%arg15 = %21, %arg16 = %25, %arg17 = %29, %arg18 = %34) -> (!gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>) {
             %36 = addi %arg14, %c64 : index
             %37 = addi %12, %c64 : index
@@ -112,10 +112,10 @@ module  {
             gpu.barrier
             scf.yield %46#0, %46#1, %46#2, %46#3 : !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>
           }
-          gpu.subgroup_mma_store_matrix %35#0, %2[%19, %20] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf16>
-          gpu.subgroup_mma_store_matrix %35#1, %2[%23, %24] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf16>
-          gpu.subgroup_mma_store_matrix %35#2, %2[%26, %28] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf16>
-          gpu.subgroup_mma_store_matrix %35#3, %2[%31, %33] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf16>
+          gpu.subgroup_mma_store_matrix %35#0, %2[%19, %20] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf32>
+          gpu.subgroup_mma_store_matrix %35#1, %2[%23, %24] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf32>
+          gpu.subgroup_mma_store_matrix %35#2, %2[%26, %28] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf32>
+          gpu.subgroup_mma_store_matrix %35#3, %2[%31, %33] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf32>
         }
       }
       gpu.terminator

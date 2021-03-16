@@ -9,13 +9,13 @@ module  {
   func @main() {
     %0 = alloc() : memref<1024x1024xf16>
     %1 = alloc() : memref<1024x1024xf16>
-    %2 = alloc() : memref<1024x1024xf16>
+    %2 = alloc() : memref<1024x1024xf32>
     %3 = memref_cast %0 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %3 : memref<*xf16>
     %4 = memref_cast %1 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %4 : memref<*xf16>
-    %5 = memref_cast %2 : memref<1024x1024xf16> to memref<*xf16>
-    gpu.host_register %5 : memref<*xf16>
+    %5 = memref_cast %2 : memref<1024x1024xf32> to memref<*xf32>
+    gpu.host_register %5 : memref<*xf32>
     affine.parallel (%arg0) = (0) to (1024) step (64) {
       affine.parallel (%arg1) = (0) to (1024) step (64) {
         %6 = get_global_memref @asmem : memref<64x64xf16, 3>
@@ -24,16 +24,16 @@ module  {
           affine.parallel (%arg3) = (0) to (64) step (32) {
             %8 = affine.apply #map0(%arg0, %arg2)
             %9 = affine.apply #map0(%arg1, %arg3)
-            %10 = gpu.subgroup_mma_load_matrix %2[%8, %9] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf16> -> !gpu.mmafragment<8, f32>
+            %10 = gpu.subgroup_mma_load_matrix %2[%8, %9] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf32> -> !gpu.mmafragment<8, f32>
             %11 = affine.apply #map1(%arg0, %arg2)
             %12 = affine.apply #map0(%arg1, %arg3)
-            %13 = gpu.subgroup_mma_load_matrix %2[%11, %12] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf16> -> !gpu.mmafragment<8, f32>
+            %13 = gpu.subgroup_mma_load_matrix %2[%11, %12] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf32> -> !gpu.mmafragment<8, f32>
             %14 = affine.apply #map0(%arg0, %arg2)
             %15 = affine.apply #map1(%arg1, %arg3)
-            %16 = gpu.subgroup_mma_load_matrix %2[%14, %15] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf16> -> !gpu.mmafragment<8, f32>
+            %16 = gpu.subgroup_mma_load_matrix %2[%14, %15] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf32> -> !gpu.mmafragment<8, f32>
             %17 = affine.apply #map1(%arg0, %arg2)
             %18 = affine.apply #map1(%arg1, %arg3)
-            %19 = gpu.subgroup_mma_load_matrix %2[%17, %18] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf16> -> !gpu.mmafragment<8, f32>
+            %19 = gpu.subgroup_mma_load_matrix %2[%17, %18] {leadDimension = 1024 : index, operand = "COp"} : memref<1024x1024xf32> -> !gpu.mmafragment<8, f32>
             %20:4 = affine.for %arg4 = 0 to 1024 step 64 iter_args(%arg5 = %10, %arg6 = %13, %arg7 = %16, %arg8 = %19) -> (!gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>) {
               affine.parallel (%arg9) = (%arg4) to (%arg4 + 64) {
                 affine.parallel (%arg10) = (%arg1) to (%arg1 + 64) {
@@ -70,10 +70,10 @@ module  {
               gpu.barrier
               affine.yield %21#0, %21#1, %21#2, %21#3 : !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>
             }
-            gpu.subgroup_mma_store_matrix %20#0, %2[%8, %9] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf16>
-            gpu.subgroup_mma_store_matrix %20#1, %2[%11, %12] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf16>
-            gpu.subgroup_mma_store_matrix %20#2, %2[%14, %15] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf16>
-            gpu.subgroup_mma_store_matrix %20#3, %2[%17, %18] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf16>
+            gpu.subgroup_mma_store_matrix %20#0, %2[%8, %9] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf32>
+            gpu.subgroup_mma_store_matrix %20#1, %2[%11, %12] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf32>
+            gpu.subgroup_mma_store_matrix %20#2, %2[%14, %15] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf32>
+            gpu.subgroup_mma_store_matrix %20#3, %2[%17, %18] {leadDimension = 1024 : index} : !gpu.mmafragment<8, f32>, memref<1024x1024xf32>
           }
         }
       }
