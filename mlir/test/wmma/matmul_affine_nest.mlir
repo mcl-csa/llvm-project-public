@@ -44,29 +44,43 @@ func @main() {
     }
   }
   
-  %00 = memref_cast %A : memref<1024x1024xf16> to memref<*xf16>
-  gpu.host_register %00 : memref<*xf16>
-  %11 = memref_cast %B : memref<1024x1024xf16> to memref<*xf16>
-  gpu.host_register %11 : memref<*xf16>
-  %22 = memref_cast %C : memref<1024x1024xf32> to memref<*xf32>
-  gpu.host_register %22 : memref<*xf32>
+  %t0 = gpu.wait async
+
+  // Allocate actual input/output arrays on device.
+  %gpu_A, %t5 = gpu.alloc async [%t0] () : memref<1024x1024xf16>
+  %gpu_B, %t6 = gpu.alloc async [%t0] () : memref<1024x1024xf16>
+  %gpu_C, %t7 = gpu.alloc async [%t0] () : memref<1024x1024xf32>
+
+  // Copy initialized arrays from host to device.
+  %t2 = gpu.memcpy async [%t0] %gpu_A, %A : memref<1024x1024xf16>, memref<1024x1024xf16>
+  %t3 = gpu.memcpy async [%t0] %gpu_B, %B : memref<1024x1024xf16>, memref<1024x1024xf16>
+  %t4 = gpu.memcpy async [%t0] %gpu_C, %C : memref<1024x1024xf32>, memref<1024x1024xf32>
   
+  gpu.wait [%t0]
+
+  // Main kernel
   %t_start = call @rtclock() : () -> (f64)
   affine.for %i = 0 to %M {
     affine.for %j = 0 to %N {
       affine.for %l = 0 to %K {
-        %a = affine.load %A[%i, %l] : memref<1024x1024xf16>
-        %b = affine.load %B[%l, %j] : memref<1024x1024xf16>
-        %c = affine.load %C[%i, %j] : memref<1024x1024xf32>
+        %a = affine.load %gpu_A[%i, %l] : memref<1024x1024xf16>
+        %b = affine.load %gpu_B[%l, %j] : memref<1024x1024xf16>
+        %c = affine.load %gpu_C[%i, %j] : memref<1024x1024xf32>
         %p = mulf %a, %b : f16
         %q = fpext %p : f16 to f32
         %co = addf %c, %q : f32
-        affine.store %co, %C[%i, %j] : memref<1024x1024xf32>
+        affine.store %co, %gpu_C[%i, %j] : memref<1024x1024xf32>
       }
     }
   }
   %t_end = call @rtclock() : () -> (f64)
   
+  %t1 = gpu.wait async 
+  // Copy result matrix back to host for printing.
+  %t8 = gpu.memcpy async [%t1] %C, %gpu_C : memref<1024x1024xf32>, memref<1024x1024xf32>
+  gpu.wait[%t8]
+  
+  // Logic for printing perf.
   %t = subf %t_end, %t_start : f64
   %f1 = muli %M, %N : index
   %f2 = muli %f1, %K : index
@@ -80,7 +94,8 @@ func @main() {
   %flops = divf %num_flops_f, %t : f64
   call @print_flops(%flops) : (f64) -> ()
   
-  call @print_memref_f32(%22) : (memref<*xf32>) -> ()
+  %22 = memref_cast %C : memref<1024x1024xf32> to memref<*xf32>
+  //call @print_memref_f32(%22) : (memref<*xf32>) -> ()
   
   return
 }
