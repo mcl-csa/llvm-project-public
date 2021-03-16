@@ -4,7 +4,7 @@
 // RUN:   --shared-libs=%linalg_test_lib_dir/libmlir_cuda_runtime%shlibext \
 // RUN:   --shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext \
 // RUN:   --shared-libs=%linalg_test_lib_dir/libmlir_c_runner_utils%shlibext \
-// RUN:   --entry-point-result=void \
+// RUN:   --entry-point-result=void
 
 module attributes {gpu.container_module}  {
   func @main() {

@@ -1,4 +1,4 @@
-// mlir-opt mmaops-f32-scf.mlir --test-gpu-matmul-parallel-loop-mapping --canonicalize
+// RUN: mlir-opt %s --test-gpu-matmul-parallel-loop-mapping --canonicalize
 
 module  {
   global_memref @asmem : memref<64x64xf16, 3>
