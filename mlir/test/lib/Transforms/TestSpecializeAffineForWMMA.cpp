@@ -7,7 +7,9 @@
 //===----------------------------------------------------------------------===//
 //
 // This file contains specilaization patterns for matmul targetting tensor cores
-// on Nvidia GPUs.
+// on Nvidia GPUs. It inserts WMMA ops and also moves loop-invariant load/stores
+// outside the loops. It also inserts synchronization barriers wherever
+// necessary.
 //
 //===----------------------------------------------------------------------===//
 
@@ -33,15 +35,17 @@ struct TestSpecializeAffineForWMMA
 
   TestSpecializeAffineForWMMA(){};
   TestSpecializeAffineForWMMA(const TestSpecializeAffineForWMMA &) {}
-  explicit TestSpecializeAffineForWMMA(std::string accumulateType) {
-    clAccumulateType = accumulateType;
+  explicit TestSpecializeAffineForWMMA(StringRef accumulateType) {
+    clAccumulateType = accumulateType.str();
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<gpu::GPUDialect, mlir::vector::VectorDialect>();
   }
 
-  /// Order of loops required in the input IR in their relative order.
+  /// Order of loops required in the input IR in their relative order. The
+  /// increasing order of values represents increasing depth in the nest, i.e,
+  /// TbI is the outermost loop while ThreadK is the innermost loop.
   enum LoopStructure {
     TbI,
     TbJ,
@@ -60,8 +64,8 @@ struct TestSpecializeAffineForWMMA
   /// Enum containing GEMM operands, usefull in accessing certain containers.
   enum WmmaOps { AOp, BOp, COp, DOp };
 
-  /// String Array representing the standard operands of matmul.
-  std::string ops[4] = {"AOp", "BOp", "COp", "DOp"};
+  /// String array representing the standard operands of matmul.
+  const std::string kOpsName[4] = {"AOp", "BOp", "COp", "DOp"};
 
   /// Constant representing the maximum number of tiled loops that can be
   /// present in the input IR.
@@ -79,19 +83,21 @@ struct TestSpecializeAffineForWMMA
   /// Constant representing the shape of WMMA op in K dimension.
   constexpr static unsigned kWMMAK = 16;
 
+  /// CL option to specify the accumulate type to use in matmul.
   Option<std::string> clAccumulateType{
-      *this, "accum", llvm::cl::desc("Accumulate type to use for matmul."),
+      *this, "accum",
+      llvm::cl::desc("Accumulate type(f16/f32) to use for matmul."),
       llvm::cl::init("f16")};
 };
 } // end anonymous namespace
 
-// Find out the Tile space loops. Three outermost loops are the tile space
-// loops. Three loops are the minimum number of loops that are to be present
-// in matrix multiplication. Since copy loops may also be present in the code,
-// The input may not be perfectly nested. Assuming that the copy loops are
-// annotated we can find differentiate them from the compute loops.
-void findComputeLoops(AffineForOp rootForOp,
-                      SmallVector<AffineForOp> &computeLoops) {
+/// Find out the Tile space loops. Three outermost loops are the tile space
+/// loops. Three loops are the minimum number of loops that are to be present
+/// in matrix multiplication. Since copy loops may also be present in the code,
+/// The input may not be perfectly nested. Assuming that the copy loops are
+/// annotated we can find differentiate them from the compute loops.
+static void findComputeLoops(AffineForOp rootForOp,
+                             SmallVector<AffineForOp> &computeLoops) {
   bool nestedForExists = true;
 
   while (nestedForExists) {
@@ -104,7 +110,7 @@ void findComputeLoops(AffineForOp rootForOp,
       if (auto forOp = dyn_cast<AffineForOp>(op)) {
         if (BoolAttr attr = forOp->getAttrOfType<BoolAttr>("isCopyLoopNest")) {
           // Make this forOp the next root.
-          // TODO: Inset assertion for multiple non-copy loop children of this
+          // TODO: Insert assertion for multiple non-copy loop children of this
           // for op.
           if (!attr.getValue()) {
             rootForOp = forOp;
@@ -118,12 +124,12 @@ void findComputeLoops(AffineForOp rootForOp,
   }
 }
 
-// Check that the loops are in the desired ordered, i.e.,
-//		    Inter Thread-Block loops(i,j,k)
-//		      Inter Warp loops(ii, jj, kk)
-//			Intra Warp loops(iii, jjj, kkk)
-void insepectTileStructure(SmallVector<AffineForOp> &computeLoops,
-                           SmallVector<Value> &loopsIVs) {
+/// Check that the loops are in the desired ordered, i.e.,
+///		    Inter Thread-Block loops(i,j,k)
+///		      Inter Warp loops(ii, jj, kk)
+///			Intra Warp loops(iii, jjj, kkk)
+static void insepectTileStructure(SmallVector<AffineForOp> &computeLoops,
+                                  SmallVector<Value> &loopsIVs) {
   unsigned curMapStage = 0;
   for (auto loop = computeLoops.begin() +
                    TestSpecializeAffineForWMMA::kNumIntialLoops,
@@ -147,7 +153,7 @@ void insepectTileStructure(SmallVector<AffineForOp> &computeLoops,
       }
 
       assert(
-          foundDependentLoopIV == true &&
+          foundDependentLoopIV &&
           "Recipe for tensor core matmul failed, improperly tiled loop nest");
       ++curMapStage;
       curMapStage %= TestSpecializeAffineForWMMA::kNumIntialLoops;
@@ -155,10 +161,10 @@ void insepectTileStructure(SmallVector<AffineForOp> &computeLoops,
   }
 }
 
-// Checks whether a given op is hoistable with respect to a forOp.
-bool canBeHoisted(Operation *op, AffineForOp forOp,
-                  SmallVector<AffineMap> &affineMaps,
-                  SmallVector<SmallVector<Value>> &mapOprs) {
+/// Checks whether a given op is hoistable with respect to a forOp.
+static bool canBeHoisted(Operation *op, AffineForOp forOp,
+                         SmallVector<AffineMap> &affineMaps,
+                         SmallVector<SmallVector<Value>> &mapOprs) {
   auto isIndependentOfLoopIV = [&](MutableArrayRef<OpOperand> operands) {
     for (auto &operand : operands) {
       // TODO: Handle cases where the operands to the op may not be results of
@@ -191,15 +197,15 @@ bool canBeHoisted(Operation *op, AffineForOp forOp,
   return false;
 }
 
-// Fetches all the uses of an op until the use converges into an op
-// with no results.
-void getRecursiveUses(
+/// Fetches all the uses of an op until the use converges into an op
+/// with no results.
+static void getRecursiveUses(
     Operation *source, Operation *op, Operation *target,
     SmallVector<std::pair<Operation *, Operation *>> &loadStoreOps) {
   auto allUses = op->getUses();
   if (allUses.empty())
     return;
-  for (auto &use : allUses) {
+  for (OpOperand &use : allUses) {
     // Inspect ops wihtout any regions, i.e., avoid forops, ifops etc.
     if (use.getOwner()->getNumRegions() == 0) {
       if (use.getOwner() == target) {
@@ -211,9 +217,9 @@ void getRecursiveUses(
   }
 }
 
-// Find all pairs of load/store ops that can be moved and move them just
-// before/after the forOp.
-void findAndMoveLoadStorePairs(
+/// Find all pairs of load/store ops that can be moved and move them just
+/// before/after the forOp.
+static void findAndMoveLoadStorePairs(
     AffineForOp forOp, OpBuilder &b,
     SmallVector<std::pair<Operation *, Operation *>> &loadStoreOps) {
   auto &loopBody = forOp.getLoopBody();
@@ -239,7 +245,7 @@ void findAndMoveLoadStorePairs(
   }
 
   // If no load/store pair found, then return.
-  if (loadStoreOps.size() == 0)
+  if (loadStoreOps.empty())
     return;
 
   SmallVector<Value> newLoadOps;
@@ -248,12 +254,12 @@ void findAndMoveLoadStorePairs(
   SmallVector<SmallVector<Value>> newIndices;
 
   // Check if the load/store op pairs are hoistable.
-  for (auto &p : loadStoreOps) {
+  for (auto &memOp : loadStoreOps) {
     SmallVector<AffineMap> indexMaps;
     SmallVector<SmallVector<Value>> mapOprs;
     // TODO: Insert check for storeOp also.
-    if (canBeHoisted(p.first, forOp, indexMaps, mapOprs)) {
-      movableOps.push_back(p.first);
+    if (canBeHoisted(memOp.first, forOp, indexMaps, mapOprs)) {
+      movableOps.push_back(memOp.first);
 
       b.setInsertionPoint(forOp);
       SmallVector<Value> indices;
@@ -272,14 +278,14 @@ void findAndMoveLoadStorePairs(
       // already fetched the operands using the affine map composition and we
       // can safely create the same ops outside this for loop. Create new load
       // ops. These ops will be used as iter_args for the forOp.
-      auto origLoadop = cast<gpu::SubgroupMmaLoadMatrixOp>(p.first);
+      auto origLoadop = cast<gpu::SubgroupMmaLoadMatrixOp>(memOp.first);
       newLoadOps.push_back(b.create<gpu::SubgroupMmaLoadMatrixOp>(
           forOp.getLoc(), origLoadop->getResultTypes()[0],
           origLoadop.srcMemref(), indices, origLoadop.leadDimension()));
     }
   }
 
-  if (movableOps.size() == 0)
+  if (movableOps.empty())
     return;
 
   // Insert newly created ops as operands for the for op.
@@ -369,14 +375,14 @@ void findAndMoveLoadStorePairs(
   }
 }
 
-// Utility to move invariant load/store pairs with respect to a forOp
-// before/after respectively. The utility finds loads such that the result of
-// the store is somehow dependent on the what was loaded. The loads are moved
-// just before the forOp and the load results are set as iter_args for the
-// forOp. The result of the computation is then yielded by the forOp and result
-// of the forOp is then store by the storeOps which are moved just after the
-// forOp. In this way redundant load/stores can be moved out of a given forOp.
-void moveInvariantLoadStorePairs(FuncOp funcOp, OpBuilder b) {
+/// Utility to move invariant load/store pairs with respect to a forOp
+/// before/after respectively. The utility finds loads such that the result of
+/// the store is somehow dependent on the what was loaded. The loads are moved
+/// just before the forOp and the load results are set as iter_args for the
+/// forOp. The result of the computation is then yielded by the forOp and result
+/// of the forOp is then store by the storeOps which are moved just after the
+/// forOp. In this way redundant load/stores can be moved out of a given forOp.
+static void moveInvariantLoadStorePairs(FuncOp funcOp, OpBuilder b) {
   SmallVector<std::pair<Operation *, Operation *>> loadStoreOps;
   funcOp->walk([&](AffineForOp forOp) {
     findAndMoveLoadStorePairs(forOp, b, loadStoreOps);
@@ -528,7 +534,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
         wmmaOps.push_back(b.create<gpu::SubgroupMmaLoadMatrixOp>(
             loc,
             gpu::MMAMatrixType::get({16, 16}, operandElemTypes[numOpsProcessed],
-                                    ops[numOpsProcessed]),
+                                    kOpsName[numOpsProcessed]),
             loadOp.memref(), index, b.getIndexAttr(opType.getDimSize(1))));
         ++numOpsProcessed;
       }
@@ -538,7 +544,8 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
         // emit the compute and store op also.
         wmmaOps.push_back(b.create<gpu::SubgroupMmaComputeOp>(
             loc,
-            gpu::MMAMatrixType::get({16, 16}, operandElemTypes[COp], ops[COp]),
+            gpu::MMAMatrixType::get({16, 16}, operandElemTypes[COp],
+                                    kOpsName[COp]),
             wmmaOps[numOpsProcessed - 3], wmmaOps[numOpsProcessed - 2],
             wmmaOps[numOpsProcessed - 1]));
 
