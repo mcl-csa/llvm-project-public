@@ -39,6 +39,16 @@ struct TestSpecializeAffineForWMMA
     clAccumulateType = accumulateType.str();
   }
 
+  explicit TestSpecializeAffineForWMMA(unsigned loadStoreWidth) {
+    clLoadStoreWidth = loadStoreWidth;
+  }
+
+  explicit TestSpecializeAffineForWMMA(StringRef accumulateType,
+                                       unsigned loadStoreWidth) {
+    clAccumulateType = accumulateType.str();
+    clLoadStoreWidth = loadStoreWidth;
+  }
+
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<gpu::GPUDialect, mlir::vector::VectorDialect>();
   }
@@ -83,11 +93,26 @@ struct TestSpecializeAffineForWMMA
   /// Constant representing the shape of WMMA op in K dimension.
   constexpr static unsigned kWMMAK = 16;
 
+  /// Copy loop-nest string identifier.
+  static const std::string isCopyLoopNest;
+
+  /// Copy loop-nest string identifier.
+  static const std::string isParallel;
+
   /// CL option to specify the accumulate type to use in matmul.
   Option<std::string> clAccumulateType{
       *this, "accum",
       llvm::cl::desc("Accumulate type(f16/f32) to use for matmul."),
       llvm::cl::init("f16")};
+
+  /// CL option to specify vector width to use for global memory loads.
+  Option<unsigned> clLoadStoreWidth{
+      *this, "load-store-width",
+      llvm::cl::desc(
+          "Vector width in bits to use for load/store operations. "
+          "Valid widths are 32, 64 and 128. No vectorization if option"
+          "is unspecified."),
+      llvm::cl::init(0)};
 };
 } // end anonymous namespace
 
@@ -108,7 +133,8 @@ static void findComputeLoops(AffineForOp rootForOp,
 
     for (auto op = body.begin(), e = body.end(); op != e; ++op) {
       if (auto forOp = dyn_cast<AffineForOp>(op)) {
-        if (BoolAttr attr = forOp->getAttrOfType<BoolAttr>("isCopyLoopNest")) {
+        if (BoolAttr attr = forOp->getAttrOfType<BoolAttr>(
+                TestSpecializeAffineForWMMA::isCopyLoopNest)) {
           // Make this forOp the next root.
           // TODO: Insert assertion for multiple non-copy loop children of this
           // for op.
@@ -415,7 +441,8 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   // Check and mark the parallel loops in the IR.
   funcOp.walk([&](AffineForOp loop) {
     if (isLoopParallel(loop))
-      loop->setAttr("isParallel", BoolAttr::get(loop.getContext(), true));
+      loop->setAttr(TestSpecializeAffineForWMMA::isParallel,
+                    BoolAttr::get(loop.getContext(), true));
   });
 
   // Get the root for op first.
@@ -502,11 +529,11 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   };
 
   // Now try to get the source/destination matrices for matmul in the original
-  // innermostLoop and create corresponding ops in the new innermostLoop. We do
-  // so by inspecting the innermost loop body. We'll assume the first load to be
-  // the `A` operand, second to be the `B` operand, Third to be the `C` operand.
-  // We also emit affine.apply's for each index of the load/store op in order to
-  // use them as indices for gpuWmmaOps.
+  // innermostLoop and create corresponding ops in the new innermostLoop. We
+  // do so by inspecting the innermost loop body. We'll assume the first load
+  // to be the `A` operand, second to be the `B` operand, Third to be the `C`
+  // operand. We also emit affine.apply's for each index of the load/store op
+  // in order to use them as indices for gpuWmmaOps.
   for (auto op = body.begin(), e = body.end(); op != e; ++op) {
     SmallVector<Value> index;
     SmallVector<Value> valueOperands;
@@ -567,23 +594,23 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   innermostLoop.erase();
   computeLoops[ThreadK] = newInnermostLoop;
 
-  // Sink down the K-loop to an inner level, just inside the warp space `i` and
-  // `j` loops. The operations in `k` loop, before the warp space `i`, must be
-  // moved with it. This, makes those operations get executed more number of
-  // times than before, but, when these loops are mapped to a warp in GPU, It is
-  // ideally expected that they have a single iteration. So They will get
-  // executed only once.
+  // Sink down the K-loop to an inner level, just inside the warp space `i`
+  // and `j` loops. The operations in `k` loop, before the warp space `i`,
+  // must be moved with it. This, makes those operations get executed more
+  // number of times than before, but, when these loops are mapped to a warp
+  // in GPU, It is ideally expected that they have a single iteration. So They
+  // will get executed only once.
   b.setInsertionPointToStart(&computeLoops[WarpJ].getLoopBody().front());
 
   SmallVector<Operation *> toErase;
   Block &kBody = computeLoops[TbK].getLoopBody().front();
 
-  // Gather all operations between the global `k` loop and the warp-space loops.
-  // Clone them just inside the sunken `k` loop.
+  // Gather all operations between the global `k` loop and the warp-space
+  // loops. Clone them just inside the sunken `k` loop.
   for (auto op = kBody.begin(), e = kBody.end();
        op != e && &*op != computeLoops[WarpI].getOperation(); ++op) {
-    // TODO: Inspect the loop structure and guarantee that only copy loops exist
-    // here.
+    // TODO: Inspect the loop structure and guarantee that only copy loops
+    // exist here.
     b.clone(*op);
     toErase.push_back(&*op);
   }
@@ -662,6 +689,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
         b.create<AffineLoadOp>(loc, loadOp.srcMemref(), loadOp.indices())
             .getOperation());
   });
+
   funcOp.walk([&](gpu::SubgroupMmaStoreMatrixOp storeOp) {
     b.setInsertionPointAfter(storeOp);
     dummyOps.push_back(b.create<AffineStoreOp>(loc, dummyToStore,
@@ -683,9 +711,9 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   //        }
   //      }
   // In the first case we need to only insert synchronization barrier between
-  // the loops only when there is a dependence between the accesses in the first
-  // and second loop. While in the second case we need to insert barrier after
-  // the sequential loop.
+  // the loops only when there is a dependence between the accesses in the
+  // first and second loop. While in the second case we need to insert barrier
+  // after the sequential loop.
 
   // Handle the first case of synchronization insertion.
   funcOp.walk([&](AffineForOp forOp) {
@@ -738,8 +766,8 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
                     srcAccess, dstAccess, d, &depConstraints, &depComps);
                 if (hasDependence(res)) {
                   // Place a sync just after the forOp. This will ensure
-                  // synchronization for before entering nextForOp or any other
-                  // op that follows nextForOp.
+                  // synchronization for before entering nextForOp or any
+                  // other op that follows nextForOp.
                   b.setInsertionPointAfter(forOp);
                   b.create<gpu::BarrierOp>(loc);
                   isBarrierInserted = true;
@@ -753,14 +781,59 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
     }
   });
 
+  // Erase the dummy ops those were inserted to make the affine analysis work.
+  for (auto *dummyOp : dummyOps)
+    dummyOp->erase();
+
+  // Find and vectorize copy loops.
+  if (clLoadStoreWidth != 0) {
+    DenseSet<Operation *> toVectorize;
+    funcOp->walk([&](AffineForOp forOp) {
+      if (BoolAttr attr = forOp->getAttrOfType<BoolAttr>(
+              TestSpecializeAffineForWMMA::isCopyLoopNest)) {
+        // Walk and get all the load ops.
+        SmallVector<AffineLoadOp> loadOps;
+        forOp.walk([&](AffineLoadOp loadOp) { loadOps.push_back(loadOp); });
+        // Loop corresponding to the fastest varying dimension has to be
+        // vectorized. Check all the forOps that are vectorizable and find the
+        // one which corresponds to the fastest varying dimension of the loadOp.
+        // Vectorizing this loop would enable vectorized accesses and also
+        // ensure coalescing of requests.
+        int maxDimInx = -1, memRefDim, invertedDimInx;
+        AffineForOp fastestVaryingLoop;
+        forOp.walk([&](AffineForOp nestedFor) {
+          for (auto memOp : loadOps) {
+            if (isContiguousAccess(nestedFor.getInductionVar(), memOp,
+                                   &memRefDim)) {
+              invertedDimInx = memOp.getMemRefType().getRank() - memRefDim - 1;
+              if (invertedDimInx > maxDimInx) {
+                fastestVaryingLoop = nestedFor;
+                maxDimInx = invertedDimInx;
+              }
+            }
+          }
+        });
+        toVectorize.insert(fastestVaryingLoop);
+      }
+    });
+
+    // Vectorize the collected loops.
+    for (auto loop : toVectorize) {
+      AffineForOp forOp = dyn_cast<AffineForOp>(*loop);
+      if (forOp)
+        (void)loopVectorize(forOp, clLoadStoreWidth);
+    }
+  }
+
   // Convert the marked forOps to parallel. Currently, It is assumed that all
-  // the trnasformation done above do not change the nature of loops, i.e., a
+  // the transformations done above do not change the nature of loops, i.e., a
   // sequential loop remains sequential and a parallel loop remains parallel.
   // TODO: Currently this works because the parallel loops really doesn't
   // yield anything and affineParallelize also does not handle the case when
   // the ops yield somehing. Whenever this breaks we need to handle this.
   funcOp.walk([&](AffineForOp forOp) {
-    if (auto isParallel = forOp->getAttrOfType<BoolAttr>("isParallel")) {
+    if (auto isParallel = forOp->getAttrOfType<BoolAttr>(
+            TestSpecializeAffineForWMMA::isParallel)) {
       if (isParallel.getValue() == true)
         (void)affineParallelize(forOp);
     }
@@ -798,10 +871,6 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   // Erase the collected duplicates.
   for (auto *barrier : barriersToErase)
     barrier->erase();
-
-  // Erase the dummy ops those were inserted to make the affine analysis work.
-  for (auto *dummyOp : dummyOps)
-    dummyOp->erase();
 }
 
 namespace mlir {
@@ -813,3 +882,7 @@ void registerTestSpecializeAffineForWMMAPass() {
 }
 } // namespace test
 } // namespace mlir
+
+const std::string TestSpecializeAffineForWMMA::isCopyLoopNest =
+    "isCopyLoopNest";
+const std::string TestSpecializeAffineForWMMA::isParallel = "isParallel";
