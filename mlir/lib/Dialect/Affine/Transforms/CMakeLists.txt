@@ -3,6 +3,7 @@ add_mlir_dialect_library(MLIRAffineTransforms
   AffineLoopInvariantCodeMotion.cpp
   AffineLoopNormalize.cpp
   AffineParallelize.cpp
+  AffineVectorize.cpp
   LoopTiling.cpp
   LoopUnroll.cpp
   LoopUnrollAndJam.cpp

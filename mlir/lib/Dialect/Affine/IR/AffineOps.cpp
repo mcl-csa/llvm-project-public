@@ -1633,6 +1633,7 @@ struct AffineForEmptyLoopFolder : public OpRewritePattern<AffineForOp> {
     return success();
   }
 };
+
 } // end anonymous namespace
 
 void AffineForOp::getCanonicalizationPatterns(RewritePatternSet &results,

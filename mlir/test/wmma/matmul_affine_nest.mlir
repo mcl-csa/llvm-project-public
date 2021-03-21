@@ -5,15 +5,15 @@
 func @main() {
   %c16_f = constant 16.0e+00 : f16
   %f0 = constant 0.0e+00 : f32
-  %A = alloc() : memref<1024x1024xf16>
-  %B = alloc() : memref<1024x1024xf16>
-  %C = alloc() : memref<1024x1024xf32>
+  %A = alloc() : memref<4096x4096xf16>
+  %B = alloc() : memref<4096x4096xf16>
+  %C = alloc() : memref<4096x4096xf32>
   
   %c0 = constant 0 : index
   %c1 = constant 1 : index
-  %M = dim %A, %c0: memref<1024x1024xf16> 
-  %N = dim %B, %c1: memref<1024x1024xf16> 
-  %K = dim %A, %c1: memref<1024x1024xf16> 
+  %M = dim %A, %c0: memref<4096x4096xf16> 
+  %N = dim %B, %c1: memref<4096x4096xf16> 
+  %K = dim %A, %c1: memref<4096x4096xf16> 
   
   // Intialize the Input matrix A.
   scf.for %arg0 = %c0 to %M step %c1 {
@@ -22,7 +22,7 @@ func @main() {
       %add_int = index_cast %add : index to i16
       %add_float = sitofp %add_int : i16 to f16
       %rem = remf %add_float, %c16_f : f16 
-      store %rem, %A[%arg0, %arg1] : memref<1024x1024xf16>
+      store %rem, %A[%arg0, %arg1] : memref<4096x4096xf16>
     }
   }
 
@@ -33,28 +33,28 @@ func @main() {
       %add_int = index_cast %add : index to i16
       %add_float = sitofp %add_int : i16 to f16
       %rem = remf %add_float, %c16_f : f16 
-      store %rem, %B[%arg0, %arg1] : memref<1024x1024xf16>
+      store %rem, %B[%arg0, %arg1] : memref<4096x4096xf16>
     }
   }
 
   // Intialize C matrix with zeros.
   scf.for %arg0 = %c0 to %M step %c1 {
     scf.for %arg1 = %c0 to %N step %c1 {
-      store %f0, %C[%arg0, %arg1] : memref<1024x1024xf32>
+      store %f0, %C[%arg0, %arg1] : memref<4096x4096xf32>
     }
   }
   
   %t0 = gpu.wait async
 
   // Allocate actual input/output arrays on device.
-  %gpu_A, %t5 = gpu.alloc async [%t0] () : memref<1024x1024xf16>
-  %gpu_B, %t6 = gpu.alloc async [%t0] () : memref<1024x1024xf16>
-  %gpu_C, %t7 = gpu.alloc async [%t0] () : memref<1024x1024xf32>
+  %gpu_A, %t5 = gpu.alloc async [%t0] () : memref<4096x4096xf16>
+  %gpu_B, %t6 = gpu.alloc async [%t0] () : memref<4096x4096xf16>
+  %gpu_C, %t7 = gpu.alloc async [%t0] () : memref<4096x4096xf32>
 
   // Copy initialized arrays from host to device.
-  %t2 = gpu.memcpy async [%t0] %gpu_A, %A : memref<1024x1024xf16>, memref<1024x1024xf16>
-  %t3 = gpu.memcpy async [%t0] %gpu_B, %B : memref<1024x1024xf16>, memref<1024x1024xf16>
-  %t4 = gpu.memcpy async [%t0] %gpu_C, %C : memref<1024x1024xf32>, memref<1024x1024xf32>
+  %t2 = gpu.memcpy async [%t0] %gpu_A, %A : memref<4096x4096xf16>, memref<4096x4096xf16>
+  %t3 = gpu.memcpy async [%t0] %gpu_B, %B : memref<4096x4096xf16>, memref<4096x4096xf16>
+  %t4 = gpu.memcpy async [%t0] %gpu_C, %C : memref<4096x4096xf32>, memref<4096x4096xf32>
   
   gpu.wait [%t0]
 
@@ -63,13 +63,13 @@ func @main() {
   affine.for %i = 0 to %M {
     affine.for %j = 0 to %N {
       affine.for %l = 0 to %K {
-        %a = affine.load %gpu_A[%i, %l] : memref<1024x1024xf16>
-        %b = affine.load %gpu_B[%l, %j] : memref<1024x1024xf16>
-        %c = affine.load %gpu_C[%i, %j] : memref<1024x1024xf32>
+        %a = affine.load %gpu_A[%i, %l] : memref<4096x4096xf16>
+        %b = affine.load %gpu_B[%l, %j] : memref<4096x4096xf16>
+        %c = affine.load %gpu_C[%i, %j] : memref<4096x4096xf32>
         %p = mulf %a, %b : f16
         %q = fpext %p : f16 to f32
         %co = addf %c, %q : f32
-        affine.store %co, %gpu_C[%i, %j] : memref<1024x1024xf32>
+        affine.store %co, %gpu_C[%i, %j] : memref<4096x4096xf32>
       }
     }
   }
@@ -77,7 +77,7 @@ func @main() {
   
   %t1 = gpu.wait async 
   // Copy result matrix back to host for printing.
-  %t8 = gpu.memcpy async [%t1] %C, %gpu_C : memref<1024x1024xf32>, memref<1024x1024xf32>
+  %t8 = gpu.memcpy async [%t1] %C, %gpu_C : memref<4096x4096xf32>, memref<4096x4096xf32>
   gpu.wait[%t8]
   
   // Logic for printing perf.
@@ -94,7 +94,7 @@ func @main() {
   %flops = divf %num_flops_f, %t : f64
   call @print_flops(%flops) : (f64) -> ()
   
-  %22 = memref_cast %C : memref<1024x1024xf32> to memref<*xf32>
+  %22 = memref_cast %C : memref<4096x4096xf32> to memref<*xf32>
   //call @print_memref_f32(%22) : (memref<*xf32>) -> ()
   
   return

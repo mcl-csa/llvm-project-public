@@ -253,6 +253,11 @@ TileLoops extractFixedOuterLoops(scf::ForOp rootFOrOp, ArrayRef<int64_t> sizes);
 /// independent of any loop induction variable involved in the nest.
 void coalesceLoops(MutableArrayRef<scf::ForOp> loops);
 
+/// Vectorizes a loop (either outer or inner, with a perfect or imperfectly
+/// nested body). `simdWidth` is the bit width of the vectors on target.
+LogicalResult loopVectorize(AffineForOp forOp, unsigned simdWidth,
+                            DenseMap<Value, Value> *vecMemRefs = nullptr);
+
 /// Take the ParallelLoop and for each set of dimension indices, combine them
 /// into a single dimension. combinedDimensions must contain each index into
 /// loops exactly once.

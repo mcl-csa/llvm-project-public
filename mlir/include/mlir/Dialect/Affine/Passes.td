@@ -99,7 +99,7 @@ def AffineLoopUnrollAndJam : FunctionPass<"affine-loop-unroll-jam"> {
   ];
 }
 
-def AffineVectorize : FunctionPass<"affine-super-vectorize"> {
+def AffineSuperVectorize : FunctionPass<"affine-super-vectorize"> {
   let summary = "Vectorize to a target independent n-D vector abstraction";
   let constructor = "mlir::createSuperVectorizePass()";
   let dependentDialects = ["vector::VectorDialect"];
@@ -123,6 +123,14 @@ def AffineVectorize : FunctionPass<"affine-super-vectorize"> {
            "Vectorize known reductions expressed via iter_args. "
            "Switched off by default.">
   ];
+}
+
+def AffineVectorize : FunctionPass<"affine-vectorize"> {
+  let summary = "Auto-vectorize affine.for ops";
+  let constructor = "mlir::createAffineVectorizePass()";
+  let options =
+      [Option<"clSimdWidth", "simd-width", "unsigned",
+              /*default=*/"256", "Hardware vector width for vectorization">];
 }
 
 def AffineParallelize : FunctionPass<"affine-parallelize"> {
