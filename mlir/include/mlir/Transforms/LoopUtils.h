@@ -189,7 +189,7 @@ struct AffineCopyOptions {
   /// True if the global memref has to be created for allocation.
   bool useGlobalAllocation = false;
   /// Name of the global memref to be created.
-  std::string globalMemrefName;
+  std::string globalMemrefName = "global_mem";
 };
 
 /// Performs explicit copying for the contiguous sequence of operations in the
