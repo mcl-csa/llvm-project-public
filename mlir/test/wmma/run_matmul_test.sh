@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: bash run_matmul_test.sh --problem_size_m 1024 --problem_size_k 1024 --problem_size_n 1024 --thread_block_tile_m 64 --thread_block_tile_n 64 --thread_block_tile_k 16 --warp_tile_m 32 --warp_tile_n 32 --warp_tile_k 16 --verify 1
+# Usage: ./run_matmul_test.sh --problem_size_m 1024 --problem_size_k 1024 --problem_size_n 1024 --thread_block_tile_m 64 --thread_block_tile_n 64 --thread_block_tile_k 16 --warp_tile_m 32 --warp_tile_n 32 --warp_tile_k 16 --verify 1
 
 # Define the default parameters.
 problem_size_m=${problem_size_m:-4096}
@@ -38,16 +38,18 @@ MLIR_CUDA_RUNNER="../../../build/bin/mlir-cuda-runner"
 MLIR_SHARED_LIBS="../../../build/lib"
 
 # Run the pipe end to end.
-bash gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output | $MLIR_OPT --canonicalize --affine-loop-tile="num-tiling-levels=2 tile-sizes=$thread_block_tile_m,$thread_block_tile_n,$thread_block_tile_k,$warp_tile_m,$warp_tile_n,$warp_tile_k relative-indexing=true" --canonicalize -test-gpu-matmul-fast-buffer-placement="matrices=A,B global-allocation=true" --canonicalize --test-specialize-affine-matmul-for-wmma="accum=f32 load-store-width=$load_store_width" --canonicalize --test-collapse-affine-parallel --canonicalize --lower-affine --test-gpu-matmul-parallel-loop-mapping --canonicalize --test-convert-matmul-parallel-loops-to-gpu --gpu-kernel-outlining --test-gpu-mark-global-as-workgroup-memory --canonicalize --cse --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" --shared-libs=$MLIR_SHARED_LIBS/libmlir_runner_utils.so --shared-libs=$MLIR_SHARED_LIBS/libmlir_cuda_runtime.so --shared-libs=$MLIR_SHARED_LIBS/libmlir_c_runner_utils.so --entry-point-result=void > full_pipe.txt
+echo "Generating and running matmul (optimized)"
+./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output | $MLIR_OPT --canonicalize --affine-loop-tile="num-tiling-levels=2 tile-sizes=$thread_block_tile_m,$thread_block_tile_n,$thread_block_tile_k,$warp_tile_m,$warp_tile_n,$warp_tile_k relative-indexing=true" --canonicalize -test-gpu-matmul-fast-buffer-placement="matrices=A,B global-allocation=true" --canonicalize --test-specialize-affine-matmul-for-wmma="accum=f32 load-store-width=$load_store_width" --canonicalize --test-collapse-affine-parallel --canonicalize --lower-affine --test-gpu-matmul-parallel-loop-mapping --canonicalize --test-convert-matmul-parallel-loops-to-gpu --gpu-kernel-outlining --test-gpu-mark-global-as-workgroup-memory --canonicalize --cse --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" --shared-libs=$MLIR_SHARED_LIBS/libmlir_runner_utils.so --shared-libs=$MLIR_SHARED_LIBS/libmlir_cuda_runtime.so --shared-libs=$MLIR_SHARED_LIBS/libmlir_c_runner_utils.so --entry-point-result=void > full_pipe.txt
 
 if [[ $verify -eq 1 ]]
 then
-  bash gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n | $MLIR_OPT --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=200 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" --shared-libs=$MLIR_SHARED_LIBS/libmlir_runner_utils.so --shared-libs=$MLIR_SHARED_LIBS/libmlir_cuda_runtime.so --shared-libs=$MLIR_SHARED_LIBS/libmlir_c_runner_utils.so --entry-point-result=void > naive.txt
+  echo "Generating and running matmul naive (unoptimized)"
+  ./gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n | $MLIR_OPT --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=200 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" --shared-libs=$MLIR_SHARED_LIBS/libmlir_runner_utils.so --shared-libs=$MLIR_SHARED_LIBS/libmlir_cuda_runtime.so --shared-libs=$MLIR_SHARED_LIBS/libmlir_c_runner_utils.so --entry-point-result=void > naive.txt
 
   # Delete first line in the output which contains irrelecant memref info.
   sed '1d' full_pipe.txt > tmpfile; mv tmpfile full_pipe.txt
   sed '1d' naive.txt > tmpfile; mv tmpfile naive.txt
-  
+
   # Compare the output.
   cmp full_pipe.txt naive.txt
 fi
