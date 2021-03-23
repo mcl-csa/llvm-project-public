@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Usage: ./run_matmul_test.sh --problem_size_m 1024 --problem_size_k 1024 --problem_size_n 1024 --thread_block_tile_m 64 --thread_block_tile_n 64 --thread_block_tile_k 16 --warp_tile_m 32 --warp_tile_n 32 --warp_tile_k 16 --verify 1
+# Usage: ./run_matmul_test.sh --problem_size_m 1024 --problem_size_n 1024 --problem_size_k 1024 --thread_block_tile_m 64 --thread_block_tile_n 64 --thread_block_tile_k 16 --warp_tile_m 32 --warp_tile_n 32 --warp_tile_k 16 --verify 1
 
 # Define the default parameters.
 problem_size_m=${problem_size_m:-4096}
-problem_size_k=${problem_size_k:-4096}
 problem_size_n=${problem_size_n:-4096}
+problem_size_k=${problem_size_k:-4096}
 thread_block_tile_m=${thread_block_tile_m:-128}
 thread_block_tile_n=${thread_block_tile_n:-128}
 thread_block_tile_k=${thread_block_tile_k:-16}
