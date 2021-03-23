@@ -4,7 +4,6 @@ echo "module attributes {gpu.container_module} {
     %cst_0 = constant 0.000000e+00 : f16
     %c16_f = constant 16.0e+00 : f16
     %c32 = constant 32 : index
-    %c$1 = constant $1 : index
     %c128 = constant 128 : index
     %c-1 = constant -1 : index
     %c64 = constant 64 : index
@@ -22,10 +21,14 @@ echo "module attributes {gpu.container_module} {
     %c1_3 = constant 1 : index
     %c1_4 = constant 1 : index
     %c1_5 = constant 1 : index
+    
+    %M = dim %44, %c0 : memref<$1x$3xf32>
+    %N = dim %44, %c1 : memref<$1x$3xf32>
+    %K = dim %00, %c1 : memref<$1x$2xf32>
      
-    // Intialize the Input matrix with ones.
-    scf.for %arg0 = %c0 to %c$1 step %c1 {
-      scf.for %arg1 = %c0 to %c$1 step %c1 {
+    // Intialize A matrix.
+    scf.for %arg0 = %c0 to %M step %c1 {
+      scf.for %arg1 = %c0 to %K step %c1 {
         %add = addi %arg0, %arg1 : index
         %add_int = index_cast %add : index to i16
         %add_float = sitofp %add_int : i16 to f16
@@ -35,17 +38,17 @@ echo "module attributes {gpu.container_module} {
     }
     
     // Convert fp16 to fp32
-    scf.for %arg0 = %c0 to %c$1 step %c1 {
-      scf.for %arg1 = %c0 to %c$1 step %c1 {
+    scf.for %arg0 = %c0 to %M step %c1 {
+      scf.for %arg1 = %c0 to %K step %c1 {
         %6 = load %0[%arg0, %arg1] : memref<$1x$2xf16>
         %7 = fpext %6 : f16 to f32
         store %7, %00[%arg0, %arg1] : memref<$1x$2xf32>
       }
     }
     
-    // Intialize the Input matrix with ones.
-    scf.for %arg0 = %c0 to %c$1 step %c1 {
-      scf.for %arg1 = %c0 to %c$1 step %c1 {
+    // Intialize B matrix.
+    scf.for %arg0 = %c0 to %K step %c1 {
+      scf.for %arg1 = %c0 to %N step %c1 {
         %add = addi %arg0, %arg1 : index
         %add_int = index_cast %add : index to i16
         %add_float = sitofp %add_int : i16 to f16
@@ -55,8 +58,8 @@ echo "module attributes {gpu.container_module} {
     }
     
     // Convert fp16 to fp32
-    scf.for %arg0 = %c0 to %c$1 step %c1 {
-      scf.for %arg1 = %c0 to %c$1 step %c1 {
+    scf.for %arg0 = %c0 to %K step %c1 {
+      scf.for %arg1 = %c0 to %N step %c1 {
         %6 = load %1[%arg0, %arg1] : memref<$2x$3xf16>
         %7 = fpext %6 : f16 to f32
         store %7, %22[%arg0, %arg1] : memref<$2x$3xf32>
@@ -64,15 +67,15 @@ echo "module attributes {gpu.container_module} {
     }
 
     // Intialize the accumulator matrix with zeros.
-    scf.for %arg0 = %c0 to %c$1 step %c1 {
-      scf.for %arg1 = %c0 to %c$1 step %c1 {
+    scf.for %arg0 = %c0 to %M step %c1 {
+      scf.for %arg1 = %c0 to %N step %c1 {
         store %cst_0, %2[%arg0, %arg1] : memref<$1x$3xf16>
       }
     }
 
     // Convert fp16 to fp32
-    scf.for %arg0 = %c0 to %c$1 step %c1 {
-      scf.for %arg1 = %c0 to %c$1 step %c1 {
+    scf.for %arg0 = %c0 to %M step %c1 {
+      scf.for %arg1 = %c0 to %N step %c1 {
         %6 = load %2[%arg0, %arg1] : memref<$1x$3xf16>
         %7 = fpext %6 : f16 to f32
         store %7, %44[%arg0, %arg1] : memref<$1x$3xf32>
@@ -87,10 +90,6 @@ echo "module attributes {gpu.container_module} {
     
     %555 = memref_cast %44 : memref<$1x$3xf32> to memref<*xf32>
     gpu.host_register %555 : memref<*xf32>
-
-    %M = dim %44, %c0 : memref<$1x$3xf32>
-    %N = dim %44, %c1 : memref<$1x$3xf32>
-    %K = dim %00, %c1 : memref<$1x$2xf32>
 
     %gridy = divi_unsigned %M, %c32 : index
     %gridx = divi_unsigned %N, %c32 : index
@@ -137,10 +136,10 @@ echo "module attributes {gpu.container_module} {
       %14 = muli %1, %10 : index
       %15 = addi %14, %4 : index // ydim
       
-      %c$1 = constant $1 : index
+      %c$2 = constant $2 : index
       %c1 = constant 1 : index
       %c0 = constant 0 : index
-      scf.for %k = %c0 to %c$1 step %c1 {
+      scf.for %k = %c0 to %c$2 step %c1 {
         %a = load %arg2[%15,%k] : memref<$1x$2xf32>
         %b = load %arg1[%k,%13] : memref<$2x$3xf32>
         %c = load %arg0[%15, %13] : memref<$1x$3xf32>
