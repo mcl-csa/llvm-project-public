@@ -38,10 +38,10 @@ MLIR_CUDA_RUNNER="../../../build/bin/mlir-cuda-runner"
 MLIR_RUNTIME_LIB_DIR="../../../build/lib"
 MLIR_RUNTIME_LIBS="--shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_runner_utils.so --shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_cuda_runtime.so --shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_c_runner_utils.so"
 
-# Run the pipe end to end.
+# Run the optimized version with the full pipeline.
 echo "Generating and running matmul (optimized)"
-./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output \
-  | $MLIR_OPT \
+./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output > matmul_opt.mlir
+$MLIR_OPT matmul_opt.mlir \
   --canonicalize \
   --affine-loop-tile="num-tiling-levels=2 tile-sizes=$thread_block_tile_m,$thread_block_tile_n,$thread_block_tile_k,$warp_tile_m,$warp_tile_n,$warp_tile_k relative-indexing=true" \
   --canonicalize \
@@ -62,10 +62,12 @@ echo "Generating and running matmul (optimized)"
   --convert-scf-to-std \
   | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out
 
+# Run the naive version for verification.
 if [[ $verify -eq 1 ]]
 then
   echo "Generating and running matmul naive (unoptimized)"
-  ./gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n | $MLIR_OPT --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=200 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.out
+  ./gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n > matmul_naive.mlir
+  $MLIR_OPT matmul_naive.mlir --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=200 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.out
 
   # Delete first line in the output which contains irrelecant memref info.
   sed '1d' full_pipe.out > tmpfile; mv tmpfile full_pipe.out
