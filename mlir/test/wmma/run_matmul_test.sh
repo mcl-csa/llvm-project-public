@@ -40,17 +40,37 @@ MLIR_RUNTIME_LIBS="--shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_runner_utils.so -
 
 # Run the pipe end to end.
 echo "Generating and running matmul (optimized)"
-./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output | $MLIR_OPT --canonicalize --affine-loop-tile="num-tiling-levels=2 tile-sizes=$thread_block_tile_m,$thread_block_tile_n,$thread_block_tile_k,$warp_tile_m,$warp_tile_n,$warp_tile_k relative-indexing=true" --canonicalize -test-gpu-matmul-fast-buffer-placement="matrices=A,B global-allocation=true" --canonicalize --test-specialize-affine-matmul-for-wmma="accum=f32 load-store-width=$load_store_width" --canonicalize --test-collapse-affine-parallel --canonicalize --lower-affine --test-gpu-matmul-parallel-loop-mapping --canonicalize --test-convert-matmul-parallel-loops-to-gpu --gpu-kernel-outlining --test-gpu-mark-global-as-workgroup-memory --canonicalize --cse --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.txt
+./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output \
+  | $MLIR_OPT \
+  --canonicalize \
+  --affine-loop-tile="num-tiling-levels=2 tile-sizes=$thread_block_tile_m,$thread_block_tile_n,$thread_block_tile_k,$warp_tile_m,$warp_tile_n,$warp_tile_k relative-indexing=true" \
+  --canonicalize \
+  -test-gpu-matmul-fast-buffer-placement="matrices=A,B global-allocation=true" \
+  --canonicalize \
+  --test-specialize-affine-matmul-for-wmma="accum=f32 load-store-width=$load_store_width" \
+  --canonicalize \
+  --test-collapse-affine-parallel \
+  --canonicalize \
+  --lower-affine \
+  --test-gpu-matmul-parallel-loop-mapping \
+  --canonicalize \
+  --test-convert-matmul-parallel-loops-to-gpu \
+  --gpu-kernel-outlining \
+  --test-gpu-mark-global-as-workgroup-memory \
+  --canonicalize \
+  --cse \
+  --convert-scf-to-std \
+  | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out
 
 if [[ $verify -eq 1 ]]
 then
   echo "Generating and running matmul naive (unoptimized)"
-  ./gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n | $MLIR_OPT --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=200 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.txt
+  ./gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n | $MLIR_OPT --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=200 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.out
 
   # Delete first line in the output which contains irrelecant memref info.
-  sed '1d' full_pipe.txt > tmpfile; mv tmpfile full_pipe.txt
-  sed '1d' naive.txt > tmpfile; mv tmpfile naive.txt
+  sed '1d' full_pipe.out > tmpfile; mv tmpfile full_pipe.out
+  sed '1d' naive.out > tmpfile; mv tmpfile naive.out
 
   # Compare the output.
-  cmp full_pipe.txt naive.txt
+  cmp full_pipe.out naive.out
 fi
