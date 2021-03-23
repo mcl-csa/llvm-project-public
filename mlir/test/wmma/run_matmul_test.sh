@@ -69,10 +69,16 @@ then
   ./gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n > matmul_naive.mlir
   $MLIR_OPT matmul_naive.mlir --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=200 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.out
 
+  echo -ne "Verifying...   "
   # Delete first line in the output which contains irrelecant memref info.
   sed '1d' full_pipe.out > tmpfile; mv tmpfile full_pipe.out
   sed '1d' naive.out > tmpfile; mv tmpfile naive.out
 
   # Compare the output.
   cmp full_pipe.out naive.out
+  if [ $? -ne 0 ]; then
+    echo -e "\e[31mFailed\e[0m" " $file"!
+  else
+    echo -e "\e[32mPassed\e[0m"
+  fi
 fi
