@@ -1,7 +1,20 @@
+//= TestGpuMatmulFastBufferPlacement.cpp - Places matrices into fast buffer ==//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements pass that places matrices into fast buffer.
+//
+//===----------------------------------------------------------------------===//
+
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/Transforms/LoopUtils.h"
 #include "llvm/Support/CommandLine.h"
+
 using namespace mlir;
 
 #define DEBUG_TYPE "test-gpu-matmul-fast-buffer-placement"

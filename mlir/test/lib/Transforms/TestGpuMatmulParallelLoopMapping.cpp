@@ -1,4 +1,4 @@
-//===- ParallelLoopMapper.cpp - Utilities for mapping parallel loops to GPU =//
+//===---------------- TestGpuMatmulParallelLoopMapping.cpp ----------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements pass to map parallel loops to GPU devices.
+// This file implements pass to map parallel loops to GPU devices for matmul.
 //
 //===----------------------------------------------------------------------===//
 
