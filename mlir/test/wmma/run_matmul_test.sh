@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: ./run_matmul_test.sh --problem_size_m 1024 --problem_size_n 1024 --problem_size_k 1024 --thread_block_tile_m 64 --thread_block_tile_n 64 --thread_block_tile_k 16 --warp_tile_m 32 --warp_tile_n 32 --warp_tile_k 16 --verify 1
+# Usage: ./run_matmul_test.sh --problem_size_m 1024 --problem_size_n 1024 --problem_size_k 1024 --thread_block_tile_m 64 --thread_block_tile_n 64 --thread_block_tile_k 16 --warp_tile_m 32 --warp_tile_n 32 --warp_tile_k 16 --padding_a 8 --padding_b 8 --verify 1
 
 # Define the default parameters.
 problem_size_m=${problem_size_m:-4096}
@@ -12,6 +12,8 @@ thread_block_tile_k=${thread_block_tile_k:-16}
 warp_tile_m=${warp_tile_m:-64}
 warp_tile_n=${warp_tile_n:-64}
 warp_tile_k=${warp_tile_k:-16}
+padding_a=${padding_a:-8}
+padding_b=${padding_b:-8}
 load_store_width=${load_store_width:-128}
 print_output=${print_output:-0}
 verify=${verify:-0}
@@ -40,14 +42,15 @@ MLIR_RUNTIME_LIBS="--shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_runner_utils.so -
 
 # Run the optimized version with the full pipeline.
 echo "Generating and running matmul (optimized)"
-./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output > matmul_opt.mlir
-$MLIR_OPT matmul_opt.mlir \
+./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output > matmul_opt_base.mlir
+
+$MLIR_OPT matmul_opt_base.mlir \
   --canonicalize \
   --affine-loop-tile="num-tiling-levels=2 tile-sizes=$thread_block_tile_m,$thread_block_tile_n,$thread_block_tile_k,$warp_tile_m,$warp_tile_n,$warp_tile_k relative-indexing=true" \
   --canonicalize \
   -test-gpu-matmul-fast-buffer-placement="matrices=A,B global-allocation=true" \
   --canonicalize \
-  --test-specialize-affine-matmul-for-wmma="accum=f32 load-store-width=$load_store_width" \
+  --test-specialize-affine-matmul-for-wmma="accum=f32 load-store-width=$load_store_width padding-a=$padding_a padding-b=$padding_b" \
   --canonicalize \
   --test-collapse-affine-parallel \
   --canonicalize \
@@ -58,19 +61,20 @@ $MLIR_OPT matmul_opt.mlir \
   --gpu-kernel-outlining \
   --test-gpu-mark-global-as-workgroup-memory \
   --canonicalize \
-  --cse \
-  --convert-scf-to-std \
-  | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out
+  --cse > matmul_opt_inter.mlir
+  $MLIR_OPT matmul_opt_inter.mlir --convert-scf-to-std > matmul_opt_final.mlir
+
+$MLIR_CUDA_RUNNER matmul_opt_final.mlir -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out
 
 # Run the naive version for verification.
 if [[ $verify -eq 1 ]]
 then
   echo "Generating and running matmul naive (unoptimized)"
   ./gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n > matmul_naive.mlir
-  $MLIR_OPT matmul_naive.mlir --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=200 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.out
+  $MLIR_OPT matmul_naive.mlir --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.out
 
   echo -ne "Verifying...   "
-  # Delete first line in the output which contains irrelecant memref info.
+  # Delete first line in the output which contains irrelevant memref info.
   sed '1d' full_pipe.out > tmpfile; mv tmpfile full_pipe.out
   sed '1d' naive.out > tmpfile; mv tmpfile naive.out
 
