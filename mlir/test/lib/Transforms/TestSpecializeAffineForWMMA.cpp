@@ -103,7 +103,7 @@ struct TestSpecializeAffineForWMMA
   Option<std::string> clAccumulateType{
       *this, "accum",
       llvm::cl::desc("Accumulate type(f16/f32) to use for matmul."),
-      llvm::cl::init("f16")};
+      llvm::cl::init("f32")};
 
   /// CL option to specify vector width to use for global memory loads.
   Option<unsigned> clLoadStoreWidth{
@@ -112,6 +112,22 @@ struct TestSpecializeAffineForWMMA
           "Vector width in bits to use for load/store operations. "
           "Valid widths are 32, 64 and 128. No vectorization if option"
           "is unspecified."),
+      llvm::cl::init(0)};
+
+  /// CL option to specify padding factor for A matrix in shared memory.
+  Option<unsigned> clPaddingA{
+      *this, "padding-a",
+      llvm::cl::desc(
+          "Padding in number of elements for A matrix. Minimum padding factor "
+          "is 8 f16 elements, and must be a multiple of 8."),
+      llvm::cl::init(0)};
+
+  /// CL option to specify padding factor for B matrix in shared memory.
+  Option<unsigned> clPaddingB{
+      *this, "padding-b",
+      llvm::cl::desc(
+          "Padding in number of elements for B matrix. Minimum padding factor "
+          "is 8 f16 elements, and must be a multiple of 8."),
       llvm::cl::init(0)};
 };
 } // end anonymous namespace
@@ -437,6 +453,61 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   operandElemTypes[BOp] = abOpType;
   operandElemTypes[COp] = cdOpType;
   operandElemTypes[DOp] = cdOpType;
+
+  // Walk and set padding for elements in A and B matrix. Shared memory buffers
+  // are modeled as global memrefs, walk and find any getGlobalMemref ops which
+  // maybe present.
+  if (clPaddingA.getValue() != 0 || clPaddingB.getValue() != 0) {
+    funcOp.walk([&](memref::GetGlobalOp getGlobalMemrefOp) {
+      if (getGlobalMemrefOp.name().equals("frag_A") ||
+          getGlobalMemrefOp.name().equals("frag_B")) {
+        std::string newName;
+        unsigned paddingFactor;
+
+        if (getGlobalMemrefOp.name().equals("frag_A")) {
+          newName = "frag_A_padded";
+          paddingFactor = clPaddingA.getValue();
+        } else {
+          newName = "frag_B_padded";
+          paddingFactor = clPaddingB.getValue();
+        }
+
+        MemRefType fragType =
+            getGlobalMemrefOp.getResult().getType().cast<MemRefType>();
+        ArrayRef<int64_t> fragShape = fragType.getShape();
+
+        if (!fragType.getAffineMaps().empty() &&
+            fragType.getAffineMaps().front().isIdentity()) {
+          // Save and Drop the fastest varying dimesnion.
+          int64_t leadDimension = fragShape.back();
+          fragShape = fragShape.drop_back();
+          SmallVector<int64_t> newfragShape(fragShape.begin(), fragShape.end());
+
+          // Insert new dimension which is oldLeadDimension + Padding.
+          newfragShape.push_back(leadDimension + paddingFactor);
+
+          // Create new fragType.
+          MemRefType paddedAFragType = MemRefType::get(
+              newfragShape, fragType.getElementType(), fragType.getAffineMaps(),
+              fragType.getMemorySpaceAsInt());
+
+          OpBuilder b(funcOp.getContext());
+          b.setInsertionPoint(funcOp);
+          b.create<memref::GlobalOp>(funcOp.getLoc(), b.getStringAttr(newName),
+                                     b.getStringAttr("public"),
+                                     TypeAttr::get(paddedAFragType),
+                                     mlir::Attribute(), mlir::UnitAttr());
+
+          b.setInsertionPointAfter(getGlobalMemrefOp);
+          Value PaddedAFrag = b.create<memref::GetGlobalOp>(
+              getGlobalMemrefOp.getLoc(), paddedAFragType, newName);
+
+          getGlobalMemrefOp.replaceAllUsesWith(PaddedAFrag);
+          getGlobalMemrefOp.erase();
+        }
+      }
+    });
+  }
 
   // Check and mark the parallel loops in the IR.
   funcOp.walk([&](AffineForOp loop) {
