@@ -476,7 +476,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
             getGlobalMemrefOp.getResult().getType().cast<MemRefType>();
         ArrayRef<int64_t> fragShape = fragType.getShape();
 
-        if (!fragType.getAffineMaps().empty() &&
+        if (fragType.getAffineMaps().empty() ||
             fragType.getAffineMaps().front().isIdentity()) {
           // Save and Drop the fastest varying dimesnion.
           int64_t leadDimension = fragShape.back();
