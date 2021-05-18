@@ -230,6 +230,27 @@ func @use_in_backward_slice() {
     affine.yield %1, %1 : f32, f32
   }
   return
+// REDUCE: }
+}
+
+// CHECK-LABEL:func @preserve_attributes
+func @preserve_attributes(){
+  %a = memref.alloc() : memref<1024x1024xf16>
+  %b = memref.alloc() : memref<1024x1024xf16>
+  %c = memref.alloc() : memref<1024x1024xf16>
+  affine.for %i = 0 to 1024 {
+    affine.for %j = 0 to 1024 {
+      affine.for %k = 0 to 1024 {
+        %0 = affine.load %a[%i, %k] : memref<1024x1024xf16>
+        %1 = affine.load %b[%k, %j] : memref<1024x1024xf16>
+        %2 = affine.load %c[%i, %j] : memref<1024x1024xf16>
+        %4 = mulf %0, %1 : f16
+        affine.store %4, %c[%i, %j] : memref<1024x1024xf16>
+      }
+    }
+// CHECK: {isComputeLoopNest = true, lower_bound = #map{{.*}}, step = {{.*}} : index, upper_bound = #map{{.*}}}
+  } {isComputeLoopNest = true}
+  return
 }
 
 // REDUCE-LABEL: @nested_min_max
@@ -246,5 +267,25 @@ func @nested_min_max(%m: memref<?xf32>, %lb0: index,
       affine.load %m[%i] : memref<?xf32>
     }
   }
+  return
+}
+
+// CHECK-LABEL:func @preserve_attributes
+func @preserve_attributes(){
+  %a = memref.alloc() : memref<1024x1024xf16>
+  %b = memref.alloc() : memref<1024x1024xf16>
+  %c = memref.alloc() : memref<1024x1024xf16>
+  affine.for %i = 0 to 1024 {
+    affine.for %j = 0 to 1024 {
+      affine.for %k = 0 to 1024 {
+        %0 = affine.load %a[%i, %k] : memref<1024x1024xf16>
+        %1 = affine.load %b[%k, %j] : memref<1024x1024xf16>
+        %2 = affine.load %c[%i, %j] : memref<1024x1024xf16>
+        %4 = mulf %0, %1 : f16
+        affine.store %4, %c[%i, %j] : memref<1024x1024xf16>
+      }
+    }
+// CHECK: {isComputeLoopNest = true, lower_bound = #map{{.*}}, step = {{.*}} : index, upper_bound = #map{{.*}}}
+  } {isComputeLoopNest = true}
   return
 }

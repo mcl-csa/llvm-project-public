@@ -11,10 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/Dialect/Affine/Utils.h"
 #include "mlir/Analysis/AffineAnalysis.h"
 #include "mlir/Analysis/Utils.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Affine/Utils.h"
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IntegerSet.h"
@@ -191,6 +191,11 @@ mlir::affineParallelize(AffineForOp forOp,
   newPloop.getBody()->eraseArguments(
       llvm::to_vector<4>(llvm::seq<unsigned>(numIVs, numReductions + numIVs)));
 
+  // Preserve attribute if present.
+  SmallVector<NamedAttribute> pLoopAttrs(forOp->getAttrs().begin(),
+                                         forOp->getAttrs().end());
+  pLoopAttrs.append(newPloop->getAttrs().begin(), newPloop->getAttrs().end());
+  newPloop->setAttrs(pLoopAttrs);
   forOp.erase();
   return success();
 }
