@@ -38,12 +38,15 @@ class ParallelOp;
 /// Unrolls this for operation completely if the trip count is known to be
 /// constant. Returns failure otherwise.
 LogicalResult loopUnrollFull(AffineForOp forOp);
+LogicalResult loopUnrollFull(scf::ForOp forOp,
+                             bool promoteSingleIteration = true);
 
 /// Unrolls this for operation by the specified unroll factor. Returns failure
 /// if the loop cannot be unrolled either due to restrictions or due to invalid
 /// unroll factors. Requires positive loop bounds and step.
 LogicalResult loopUnrollByFactor(AffineForOp forOp, uint64_t unrollFactor);
-LogicalResult loopUnrollByFactor(scf::ForOp forOp, uint64_t unrollFactor);
+LogicalResult loopUnrollByFactor(scf::ForOp forOp, uint64_t unrollFactor,
+                                 bool promoteSingleIteration = true);
 
 /// Unrolls this loop by the specified unroll factor or its trip count,
 /// whichever is lower.
@@ -328,6 +331,38 @@ separateFullTiles(MutableArrayRef<AffineForOp> nest,
 
 /// Move loop invariant code out of `looplike`.
 LogicalResult moveLoopInvariantCode(LoopLikeOpInterface looplike);
+
+/// Performs the pipelining of pointwise copy loops using double buffering i.e.
+/// in each iteration the data is copied to one memory location and for
+/// computation the data is loaded from alternate memory location. In this way
+/// data copy and computation both happens in parallel.
+///
+/// `copyLoopAttrName` attribute is used to identify that the given loop nest
+/// is a copy loop nest which copies data from global memory to shared memory
+/// and pipelining is done in such a way that one round of execution of this
+/// loop nest is done in advance so that during computation, the computation
+/// loop nest will use the data copied in previous iteration of copy loop nest,
+/// meanwhile the copy loop nest will copy data for next iteration of compute
+/// loop nest.
+///
+/// `computeLoopAttrName` attribute is used to identify that the given loop nest
+/// is a computation loop nest which performs computation and pipelining is done
+/// in such a way that this loop nest starts execution after one iteration of
+/// copy loop nest is executed.
+void pipelineLoop(AffineForOp forOp, std::string copyLoopAttrName,
+                  std::string computeLoopAttrName);
+
+/// Splits a loop which consists of a copy-in part, which moves data to a faster
+/// memory and a compute part which uses the data copied in. Both parts are
+/// expected to be inside the loop being split. `split` essentially means moving
+/// out one iteration of the copy-in part. Now inside the copy the copy-in
+/// instructions for instruction `i + 1` will be issued while the compute will
+/// be done for iteration `i`. This now means that the upper bound of the loop
+/// has to be adjusted to prevent illegal memory acceses in the copy-in part.
+/// Doing this will consequently lead to a peeled out iteration of the compute
+/// part just after the loop being split.
+void splitLoop(AffineForOp forOp, std::string copyLoopAttrName,
+               std::string computeLoopAttrName);
 
 } // end namespace mlir
 
