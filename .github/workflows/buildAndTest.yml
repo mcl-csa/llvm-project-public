@@ -13,7 +13,7 @@ env:
 jobs:
   build:
     name: Configure, build and check
-    runs-on: self-hosted
+    runs-on: [self-hosted, gpu]
 
     steps:
       # Clone the repo. Do shallow clone to save clone time.
