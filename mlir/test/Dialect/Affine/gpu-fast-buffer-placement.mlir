@@ -90,8 +90,8 @@ func @matmul() {
 // CHECK-NEXT:              }
 // CHECK-NEXT:            }
 // CHECK-NEXT:          }
-// CHECK-NEXT:        } {isComputeLoopNest = true}
-// CHECK-NEXT:      }
+// CHECK-NEXT:        }
+// CHECK-NEXT:      } {isComputeLoopNest = true}
 // CHECK-NEXT:    }
 // CHECK-NEXT:  }
 // CHECK-NEXT:  return

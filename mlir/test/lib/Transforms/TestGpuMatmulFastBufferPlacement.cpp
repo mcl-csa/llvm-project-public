@@ -62,7 +62,7 @@ static void createAndPlaceFastBuffers(AffineForOp rootForOp,
 
   // Checks if the loop nest is perfectly nested or not. The pass doesn't work
   // in case of imperfect loop nest.
-  assert(loopNest.size() > 2 && "Expected perfectly nested loop nest.");
+  assert(loopNest.size() > 5 && "Expected perfectly nested loop nest.");
 
   SmallVector<Value, 4> inputMemrefs;
   Value outputMemRef, lhsMemRef, rhsMemRef;
@@ -123,9 +123,8 @@ static void createAndPlaceFastBuffers(AffineForOp rootForOp,
   for (Operation *copyNest : copyNests)
     copyNest->setAttr("isCopyLoopNest", opBuilder.getBoolAttr(true));
 
-  // Checks if the loop nest to be marked is present or not.
-  if (loopNest[3])
-    loopNest[3]->setAttr("isComputeLoopNest", opBuilder.getBoolAttr(true));
+  // Mark the compute loop nest.
+  loopNest[2]->setAttr("isComputeLoopNest", opBuilder.getBoolAttr(true));
 }
 
 static void runOnBlock(Block &block) {

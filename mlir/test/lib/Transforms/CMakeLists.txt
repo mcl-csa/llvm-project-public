@@ -4,12 +4,18 @@ add_mlir_library(MLIRTestTransforms
   TestConvertMatmulParallelLoopsToGPU.cpp
   TestGpuMarkGlobalAsWorkgroupMemory.cpp
   TestGpuMatmulFastBufferPlacement.cpp
+  TestGPUMatmulBarrierInsertion.cpp
   TestGpuMatmulParallelLoopMapping.cpp
   TestInlining.cpp
   TestLoopFusion.cpp
   TestLoopMapping.cpp
   TestLoopParametricTiling.cpp
   TestLoopUnrolling.cpp
+  TestUnrollAndDelayCopies.cpp
+  TestMarkParallelLoops.cpp
+  TestSplitLoop.cpp
+  TestVectorizeGPUMatmulCopyLoops.cpp
+  TestCopyLoopNormalization.cpp
   TestSpecializeAffineForWMMA.cpp
 
   EXCLUDE_FROM_LIBMLIR
@@ -19,6 +25,7 @@ add_mlir_library(MLIRTestTransforms
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Conversion/SCFToGPU
 
   LINK_LIBS PUBLIC
+  MLIRAffineTransforms
   MLIRTestDialect
   MLIRTransforms
   MLIRGPU
