@@ -1333,7 +1333,7 @@ LogicalResult mlir::loopUnrollByFactor(AffineForOp forOp,
 LogicalResult mlir::loopUnrollByFactor(scf::ForOp forOp, uint64_t unrollFactor,
                                        bool promoteSingleIteration) {
   assert(unrollFactor > 0 && "expected positive unroll factor");
-  if (unrollFactor == 1)
+  if (unrollFactor == 1 && promoteSingleIteration)
     return promoteIfSingleIteration(forOp);
 
   // Return if the loop body is empty.
@@ -1418,7 +1418,8 @@ LogicalResult mlir::loopUnrollByFactor(scf::ForOp forOp, uint64_t unrollFactor,
       std::get<0>(e).replaceAllUsesWith(std::get<1>(e));
       epilogueForOp->replaceUsesOfWith(std::get<2>(e), std::get<0>(e));
     }
-    (void)promoteIfSingleIteration(epilogueForOp);
+    if (promoteSingleIteration)
+      (void)promoteIfSingleIteration(epilogueForOp);
   }
 
   // Create unrolled loop.
