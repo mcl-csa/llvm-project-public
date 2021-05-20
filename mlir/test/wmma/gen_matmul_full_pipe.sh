@@ -1,5 +1,6 @@
 echo "func @main() {
   %c16_f = constant 16.0e+00 : f16
+  %c16 = constant 16 : index
   %f0 = constant 0.0e+00 : f32
   %A = alloc() : memref<$1x$2xf16>
   %B = alloc() : memref<$2x$3xf16>
@@ -14,22 +15,26 @@ echo "func @main() {
   // Intialize the Input matrix A.
   scf.for %arg0 = %c0 to %M step %c1 {
     scf.for %arg1 = %c0 to %K step %c1 {
-      %add = addi %arg0, %arg1 : index
-      %add_int = index_cast %add : index to i16
+      %a0 = remi_signed %arg0, %c16 : index
+      %a1 = remi_signed %arg1, %c16 : index
+      %add = addi %a0, %a1 : index
+      %addm = remi_signed %add, %c16 : index
+      %add_int = index_cast %addm : index to i16
       %add_float = sitofp %add_int : i16 to f16
-      %rem = remf %add_float, %c16_f : f16 
-      store %rem, %A[%arg0, %arg1] : memref<$1x$2xf16>
+      store %add_float, %A[%arg0, %arg1] : memref<$1x$2xf16>
     }
   }
 
   // Intialize the Input matrix B.
   scf.for %arg0 = %c0 to %K step %c1 {
     scf.for %arg1 = %c0 to %N step %c1 {
-      %add = addi %arg0, %arg1 : index
-      %add_int = index_cast %add : index to i16
+      %b0 = remi_signed %arg0, %c16 : index
+      %b1 = remi_signed %arg1, %c16 : index
+      %add = addi %b0, %b1 : index
+      %addm = remi_signed %add, %c16 : index
+      %add_int = index_cast %addm : index to i16
       %add_float = sitofp %add_int : i16 to f16
-      %rem = remf %add_float, %c16_f : f16 
-      store %rem, %B[%arg0, %arg1] : memref<$2x$3xf16>
+      store %add_float, %B[%arg0, %arg1] : memref<$2x$3xf16>
     }
   }
 
