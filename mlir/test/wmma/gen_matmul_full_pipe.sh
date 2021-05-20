@@ -2,15 +2,15 @@ echo "func @main() {
   %c16_f = constant 16.0e+00 : f16
   %c16 = constant 16 : index
   %f0 = constant 0.0e+00 : f32
-  %A = alloc() : memref<$1x$2xf16>
-  %B = alloc() : memref<$2x$3xf16>
-  %C = alloc() : memref<$1x$3xf32>
+  %A = memref.alloc() : memref<$1x$2xf16>
+  %B = memref.alloc() : memref<$2x$3xf16>
+  %C = memref.alloc() : memref<$1x$3xf32>
   
   %c0 = constant 0 : index
   %c1 = constant 1 : index
-  %M = dim %A, %c0: memref<$1x$2xf16> 
-  %N = dim %B, %c1: memref<$2x$3xf16> 
-  %K = dim %A, %c1: memref<$1x$2xf16> 
+  %M = memref.dim %A, %c0: memref<$1x$2xf16> 
+  %N = memref.dim %B, %c1: memref<$2x$3xf16> 
+  %K = memref.dim %A, %c1: memref<$1x$2xf16> 
   
   // Intialize the Input matrix A.
   scf.for %arg0 = %c0 to %M step %c1 {
@@ -21,7 +21,7 @@ echo "func @main() {
       %addm = remi_signed %add, %c16 : index
       %add_int = index_cast %addm : index to i16
       %add_float = sitofp %add_int : i16 to f16
-      store %add_float, %A[%arg0, %arg1] : memref<$1x$2xf16>
+      memref.store %add_float, %A[%arg0, %arg1] : memref<$1x$2xf16>
     }
   }
 
@@ -34,14 +34,14 @@ echo "func @main() {
       %addm = remi_signed %add, %c16 : index
       %add_int = index_cast %addm : index to i16
       %add_float = sitofp %add_int : i16 to f16
-      store %add_float, %B[%arg0, %arg1] : memref<$2x$3xf16>
+      memref.store %add_float, %B[%arg0, %arg1] : memref<$2x$3xf16>
     }
   }
 
   // Intialize C matrix with zeros.
   scf.for %arg0 = %c0 to %M step %c1 {
     scf.for %arg1 = %c0 to %N step %c1 {
-      store %f0, %C[%arg0, %arg1] : memref<$1x$3xf32>
+      memref.store %f0, %C[%arg0, %arg1] : memref<$1x$3xf32>
     }
   }
   
@@ -95,7 +95,7 @@ echo "func @main() {
   %flops = divf %num_flops_f, %t : f64
   call @print_flops(%flops) : (f64) -> ()
   
-  %22 = memref_cast %C : memref<$1x$3xf32> to memref<*xf32>"
+  %22 = memref.cast %C : memref<$1x$3xf32> to memref<*xf32>"
   
   if [[ $4 -eq 1 ]]
   then

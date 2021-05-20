@@ -8,10 +8,10 @@ problem_size_n=${problem_size_n:-8192}
 problem_size_k=${problem_size_k:-8192}
 thread_block_tile_m=${thread_block_tile_m:-128}
 thread_block_tile_n=${thread_block_tile_n:-128}
-thread_block_tile_k=${thread_block_tile_k:-32}
+thread_block_tile_k=${thread_block_tile_k:-64}
 warp_tile_m=${warp_tile_m:-32}
 warp_tile_n=${warp_tile_n:-64}
-warp_tile_k=${warp_tile_k:-16}
+warp_tile_k=${warp_tile_k:-32}
 padding_a=${padding_a:-8}
 padding_b=${padding_b:-8}
 load_store_width=${load_store_width:-128}
@@ -37,7 +37,7 @@ then
 fi
 
 MLIR_OPT="../../../build/bin/mlir-opt"
-MLIR_CUDA_RUNNER="../../../build/bin/mlir-cuda-runner"
+MLIR_CPU_RUNNER="../../../build/bin/mlir-cpu-runner"
 MLIR_RUNTIME_LIB_DIR="../../../build/lib"
 MLIR_RUNTIME_LIBS="--shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_runner_utils.so --shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_cuda_runtime.so --shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_c_runner_utils.so"
 
@@ -72,7 +72,8 @@ $MLIR_OPT matmul_opt_base.mlir \
   --cse \
   --convert-scf-to-std > matmul_opt_final.mlir
 
-$MLIR_CUDA_RUNNER matmul_opt_final.mlir -O3 --cu-jit-opt-level=$jit_opt_level --max-reg-per-thread=$reg_per_thread --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out
+$MLIR_OPT matmul_opt_final.mlir -pass-pipeline='gpu.module(strip-debuginfo,convert-gpu-to-nvvm{index-bitwidth=32},gpu-to-cubin{chip=sm_75 max-reg-per-thread='$reg_per_thread' cu-jit-opt-level='$jit_opt_level'})' -gpu-to-llvm | $MLIR_CPU_RUNNER -O3 $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out
+
 # Delete first line in the output which is irrelevant for output verification.
 sed '1d' full_pipe.out > tmpfile; mv tmpfile full_pipe.out
 

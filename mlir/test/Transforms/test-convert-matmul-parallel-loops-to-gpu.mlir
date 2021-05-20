@@ -1,283 +1,284 @@
-// RUN: mlir-opt %s --canonicalize --test-convert-matmul-parallel-loops-to-gpu | FileCheck %s
+// RUN: mlir-opt %s --canonicalize --test-convert-matmul-parallel-loops-to-gpu --canonicalize --cse | FileCheck %s
 
 #map = affine_map<(d0) -> (d0)>
-
-func @matmul() {
-  %c0 = constant 0 : index
-  %c64 = constant 64 : index
-  %c1 = constant 1 : index
-  %c-1 = constant -1 : index
-  %c32 = constant 32 : index
-  %c1024 = constant 1024 : index
-  %c16 = constant 16 : index
-  %0 = alloc() : memref<1024x1024xf16>
-  %1 = alloc() : memref<1024x1024xf16>
-  %2 = alloc() : memref<1024x1024xf16>
-  scf.parallel (%arg0, %arg1) = (%c0, %c0) to (%c1024, %c1024) step (%c64, %c64) {
-    %3 = alloca() : memref<64x64xf16, 3>
-    %4 = alloca() : memref<32x64xf16, 3>
-    %5 = alloca() : memref<64x32xf16, 3>
-    %6 = addi %arg0, %c64 : index
-    %7 = cmpi slt, %6, %c1024 : index
-    %8 = select %7, %6, %c1024 : index
-    %9 = addi %arg1, %c64 : index
-    %10 = cmpi slt, %9, %c1024 : index
-    %11 = select %10, %9, %c1024 : index
-    %12 = addi %arg0, %c64 : index
-    %13 = cmpi slt, %12, %c1024 : index
-    %14 = select %13, %12, %c1024 : index
-    %15 = addi %arg1, %c64 : index
-    %16 = cmpi slt, %15, %c1024 : index
-    %17 = select %16, %15, %c1024 : index
-    scf.parallel (%arg2, %arg3) = (%arg0, %arg1) to (%14, %17) step (%c32, %c32) {
-      %18 = muli %arg0, %c-1 : index
-      %19 = addi %18, %arg2 : index
-      %20 = addi %19, %c16 : index
-      %21 = muli %arg1, %c-1 : index
-      %22 = addi %21, %arg3 : index
-      %23 = addi %22, %c16 : index
-      %24 = gpu.subgroup_mma_load_matrix %3[%19, %22] {leadDimension = 64 : index, operand = "COp"} : memref<64x64xf16, 3> -> !gpu.mmafragment<4, vector<2xf16>>
-      %25 = gpu.subgroup_mma_load_matrix %3[%20, %22] {leadDimension = 64 : index, operand = "COp"} : memref<64x64xf16, 3> -> !gpu.mmafragment<4, vector<2xf16>>
-      %26 = gpu.subgroup_mma_load_matrix %3[%19, %23] {leadDimension = 64 : index, operand = "COp"} : memref<64x64xf16, 3> -> !gpu.mmafragment<4, vector<2xf16>>
-      %27 = gpu.subgroup_mma_load_matrix %3[%20, %23] {leadDimension = 64 : index, operand = "COp"} : memref<64x64xf16, 3> -> !gpu.mmafragment<4, vector<2xf16>>
-      %28:4 = scf.for %arg4 = %c0 to %c1024 step %c32 iter_args(%arg5 = %24, %arg6 = %25, %arg7 = %26, %arg8 = %27) -> (!gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>) {
-        %31 = addi %arg4, %c32 : index
-        %32 = cmpi slt, %31, %c1024 : index
-        %33 = select %32, %31, %c1024 : index
-        %34 = addi %arg1, %c64 : index
-        %35 = cmpi slt, %34, %c1024 : index
-        %36 = select %35, %34, %c1024 : index
-        %37 = addi %arg0, %c64 : index
-        %38 = cmpi slt, %37, %c1024 : index
-        %39 = select %38, %37, %c1024 : index
-        %40 = addi %arg4, %c32 : index
-        %41 = cmpi slt, %40, %c1024 : index
-        %42 = select %41, %40, %c1024 : index
-        %43 = subi %33, %arg4 : index
-        %c1_0 = constant 1 : index
-        %44 = subi %c1, %c1_0 : index
-        %45 = addi %43, %44 : index
-        %46 = divi_signed %45, %c1 : index
-        %c0_1 = constant 0 : index
-        %47 = subi %36, %arg1 : index
-        %c1_2 = constant 1 : index
-        %48 = subi %c1, %c1_2 : index
-        %49 = addi %47, %48 : index
-        %50 = divi_signed %49, %c1 : index
-        %c0_3 = constant 0 : index
-        %c0_4 = constant 0 : index
-        %c1_5 = constant 1 : index
-        %c1_6 = constant 1 : index
-        %51 = muli %c1_6, %46 : index
-        %52 = muli %51, %50 : index
-        scf.parallel (%arg9) = (%c0_4) to (%52) step (%c1_5) {
-          %67 = remi_signed %arg9, %50 : index
-          %68 = divi_signed %arg9, %50 : index
-          %69 = addi %67, %arg1 : index
-          %70 = addi %68, %arg4 : index
-          %71 = load %1[%70, %69] : memref<1024x1024xf16>
-          %72 = muli %arg4, %c-1 : index
-          %73 = addi %72, %70 : index
-          %74 = muli %arg1, %c-1 : index
-          %75 = addi %74, %69 : index
-          store %71, %4[%73, %75] : memref<32x64xf16, 3>
-          scf.yield
-        } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
-        %53 = subi %39, %arg0 : index
-        %c1_7 = constant 1 : index
-        %54 = subi %c1, %c1_7 : index
-        %55 = addi %53, %54 : index
-        %56 = divi_signed %55, %c1 : index
-        %c0_8 = constant 0 : index
-        %57 = subi %42, %arg4 : index
-        %c1_9 = constant 1 : index
-        %58 = subi %c1, %c1_9 : index
-        %59 = addi %57, %58 : index
-        %60 = divi_signed %59, %c1 : index
-        %c0_10 = constant 0 : index
-        %c0_11 = constant 0 : index
-        %c1_12 = constant 1 : index
-        %c1_13 = constant 1 : index
-        %61 = muli %c1_13, %56 : index
-        %62 = muli %61, %60 : index
-        scf.parallel (%arg9) = (%c0_11) to (%62) step (%c1_12) {
-          %67 = remi_signed %arg9, %60 : index
-          %68 = divi_signed %arg9, %60 : index
-          %69 = addi %67, %arg4 : index
-          %70 = addi %68, %arg0 : index
-          %71 = load %0[%70, %69] : memref<1024x1024xf16>
-          %72 = muli %arg0, %c-1 : index
-          %73 = addi %72, %70 : index
-          %74 = muli %arg4, %c-1 : index
-          %75 = addi %74, %69 : index
-          store %71, %5[%73, %75] : memref<64x32xf16, 3>
-          scf.yield
-        } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
-        %63 = addi %arg4, %c32 : index
-        %64 = cmpi slt, %63, %c1024 : index
-        %65 = select %64, %63, %c1024 : index
-        %66:4 = scf.for %arg9 = %arg4 to %65 step %c16 iter_args(%arg10 = %24, %arg11 = %25, %arg12 = %26, %arg13 = %27) -> (!gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>) {
-          %67 = muli %arg4, %c-1 : index
-          %68 = addi %67, %arg9 : index
-          %69 = addi %18, %arg2 : index
-          %70 = addi %19, %c16 : index
-          %71 = gpu.subgroup_mma_load_matrix %5[%69, %68] {leadDimension = 32 : index, operand = "AOp"} : memref<64x32xf16, 3> -> !gpu.mmafragment<8, vector<2xf16>>
-          %72 = gpu.subgroup_mma_load_matrix %5[%70, %68] {leadDimension = 32 : index, operand = "AOp"} : memref<64x32xf16, 3> -> !gpu.mmafragment<8, vector<2xf16>>
-          %73 = addi %21, %arg3 : index
-          %74 = addi %22, %c16 : index
-          %75 = gpu.subgroup_mma_load_matrix %4[%68, %73] {leadDimension = 64 : index, operand = "BOp"} : memref<32x64xf16, 3> -> !gpu.mmafragment<8, vector<2xf16>>
-          %76 = gpu.subgroup_mma_compute %71, %75, %24 : !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>> -> !gpu.mmafragment<4, vector<2xf16>>
-          %77 = gpu.subgroup_mma_compute %72, %75, %25 : !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>> -> !gpu.mmafragment<4, vector<2xf16>>
-          %78 = gpu.subgroup_mma_load_matrix %4[%68, %74] {leadDimension = 64 : index, operand = "BOp"} : memref<32x64xf16, 3> -> !gpu.mmafragment<8, vector<2xf16>>
-          %79 = gpu.subgroup_mma_compute %71, %78, %26 : !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>> -> !gpu.mmafragment<4, vector<2xf16>>
-          %80 = gpu.subgroup_mma_compute %72, %78, %27 : !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>> -> !gpu.mmafragment<4, vector<2xf16>>
-          scf.yield %76, %77, %79, %80 : !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>
-        }
-        scf.yield %66#0, %66#1, %66#2, %66#3 : !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>
+module  {
+  memref.global "public" @frag_A : memref<128x64xf16, 3>
+  memref.global "public" @frag_B : memref<64x64xf16, 3>
+  memref.global "public" @frag_B_padded : memref<64x72xf16, 3>
+  memref.global "public" @frag_A_padded : memref<128x72xf16, 3>
+  func @main() {
+    %c960 = constant 960 : index
+    %c-1 = constant -1 : index
+    %c512 = constant 512 : index
+    %c8 = constant 8 : index
+    %c48 = constant 48 : index
+    %c32 = constant 32 : index
+    %c64 = constant 64 : index
+    %c128 = constant 128 : index
+    %c0 = constant 0 : index
+    %c16 = constant 16 : index
+    %cst = constant 0.000000e+00 : f32
+    %c1 = constant 1 : index
+    %c1024 = constant 1024 : index
+    %c2147483648_i64 = constant 2147483648 : i64
+    %0 = memref.alloc() : memref<1024x1024xf16>
+    %1 = memref.alloc() : memref<1024x1024xf16>
+    %2 = memref.alloc() : memref<1024x1024xf32>
+    scf.for %arg0 = %c0 to %c1024 step %c1 {
+      scf.for %arg1 = %c0 to %c1024 step %c1 {
+        %16 = remi_signed %arg0, %c16 : index
+        %17 = remi_signed %arg1, %c16 : index
+        %18 = addi %16, %17 : index
+        %19 = remi_signed %18, %c16 : index
+        %20 = index_cast %19 : index to i16
+        %21 = sitofp %20 : i16 to f16
+        memref.store %21, %0[%arg0, %arg1] : memref<1024x1024xf16>
       }
-      %29 = addi %arg0, %c16 : index
-      %30 = addi %arg1, %c16 : index
-      gpu.subgroup_mma_store_matrix %28#0, %2[%arg0, %arg1] {leadDimension = 1024 : index} : !gpu.mmafragment<4, vector<2xf16>>, memref<1024x1024xf16>
-      gpu.subgroup_mma_store_matrix %28#1, %2[%29, %arg1] {leadDimension = 1024 : index} : !gpu.mmafragment<4, vector<2xf16>>, memref<1024x1024xf16>
-      gpu.subgroup_mma_store_matrix %28#2, %2[%arg0, %30] {leadDimension = 1024 : index} : !gpu.mmafragment<4, vector<2xf16>>, memref<1024x1024xf16>
-      gpu.subgroup_mma_store_matrix %28#3, %2[%29, %30] {leadDimension = 1024 : index} : !gpu.mmafragment<4, vector<2xf16>>, memref<1024x1024xf16>
+    }
+    scf.for %arg0 = %c0 to %c1024 step %c1 {
+      scf.for %arg1 = %c0 to %c1024 step %c1 {
+        %16 = remi_signed %arg0, %c16 : index
+        %17 = remi_signed %arg1, %c16 : index
+        %18 = addi %16, %17 : index
+        %19 = remi_signed %18, %c16 : index
+        %20 = index_cast %19 : index to i16
+        %21 = sitofp %20 : i16 to f16
+        memref.store %21, %1[%arg0, %arg1] : memref<1024x1024xf16>
+      }
+    }
+    scf.for %arg0 = %c0 to %c1024 step %c1 {
+      scf.for %arg1 = %c0 to %c1024 step %c1 {
+        memref.store %cst, %2[%arg0, %arg1] : memref<1024x1024xf32>
+      }
+    }
+    %3 = gpu.wait async 
+    %memref, %asyncToken = gpu.alloc async [%3] () : memref<1024x1024xf16>
+    %4 = memref_vector_cast %memref : memref<1024x1024xf16> to memref<1024x128xvector<8xf16>>
+    %memref_0, %asyncToken_1 = gpu.alloc async [%3] () : memref<1024x1024xf16>
+    %5 = memref_vector_cast %memref_0 : memref<1024x1024xf16> to memref<1024x128xvector<8xf16>>
+    %memref_2, %asyncToken_3 = gpu.alloc async [%3] () : memref<1024x1024xf32>
+    %6 = gpu.memcpy async [%3] %memref, %0 : memref<1024x1024xf16>, memref<1024x1024xf16>
+    %7 = gpu.memcpy async [%3] %memref_0, %1 : memref<1024x1024xf16>, memref<1024x1024xf16>
+    %8 = gpu.memcpy async [%3] %memref_2, %2 : memref<1024x1024xf32>, memref<1024x1024xf32>
+    gpu.wait [%3]
+    %9 = call @rtclock() : () -> f64
+    scf.parallel (%arg0, %arg1) = (%c0, %c0) to (%c1024, %c1024) step (%c128, %c64) {
+      %16 = memref.get_global @frag_B_padded : memref<64x72xf16, 3>
+      %17 = memref_vector_cast %16 : memref<64x72xf16, 3> to memref<64x9xvector<8xf16>, 3>
+      %18 = memref.get_global @frag_A_padded : memref<128x72xf16, 3>
+      %19 = memref_vector_cast %18 : memref<128x72xf16, 3> to memref<128x9xvector<8xf16>, 3>
+      scf.parallel (%arg2, %arg3) = (%c0, %c0) to (%c128, %c64) step (%c64, %c32) {
+        %20 = addi %arg0, %arg2 : index
+        %21 = addi %arg1, %arg3 : index
+        %22 = gpu.subgroup_mma_load_matrix %memref_2[%20, %21] {leadDimension = 1024 : index} : memref<1024x1024xf32> -> !gpu.mma_matrix<16x16xf32, "COp">
+        %23 = addi %20, %c16 : index
+        %24 = gpu.subgroup_mma_load_matrix %memref_2[%23, %21] {leadDimension = 1024 : index} : memref<1024x1024xf32> -> !gpu.mma_matrix<16x16xf32, "COp">
+        %25 = addi %20, %c32 : index
+        %26 = gpu.subgroup_mma_load_matrix %memref_2[%25, %21] {leadDimension = 1024 : index} : memref<1024x1024xf32> -> !gpu.mma_matrix<16x16xf32, "COp">
+        %27 = addi %20, %c48 : index
+        %28 = gpu.subgroup_mma_load_matrix %memref_2[%27, %21] {leadDimension = 1024 : index} : memref<1024x1024xf32> -> !gpu.mma_matrix<16x16xf32, "COp">
+        %29 = addi %21, %c16 : index
+        %30 = gpu.subgroup_mma_load_matrix %memref_2[%20, %29] {leadDimension = 1024 : index} : memref<1024x1024xf32> -> !gpu.mma_matrix<16x16xf32, "COp">
+        %31 = gpu.subgroup_mma_load_matrix %memref_2[%23, %29] {leadDimension = 1024 : index} : memref<1024x1024xf32> -> !gpu.mma_matrix<16x16xf32, "COp">
+        %32 = gpu.subgroup_mma_load_matrix %memref_2[%25, %29] {leadDimension = 1024 : index} : memref<1024x1024xf32> -> !gpu.mma_matrix<16x16xf32, "COp">
+        %33 = gpu.subgroup_mma_load_matrix %memref_2[%27, %29] {leadDimension = 1024 : index} : memref<1024x1024xf32> -> !gpu.mma_matrix<16x16xf32, "COp">
+        scf.parallel (%arg4) = (%c0) to (%c512) step (%c1) {
+          %36 = remi_signed %arg4, %c8 : index
+          %37 = divi_signed %arg4, %c8 : index
+          %38 = muli %36, %c8 : index
+          %39 = addi %arg1, %38 : index
+          %40 = cmpi slt, %39, %c0 : index
+          %41 = subi %c-1, %39 : index
+          %42 = select %40, %41, %39 : index
+          %43 = divi_signed %42, %c8 : index
+          %44 = subi %c-1, %43 : index
+          %45 = select %40, %44, %43 : index
+          %46 = memref.load %5[%37, %45] : memref<1024x128xvector<8xf16>>
+          %47 = cmpi slt, %38, %c0 : index
+          %48 = subi %c-1, %38 : index
+          %49 = select %47, %48, %38 : index
+          %50 = divi_signed %49, %c8 : index
+          %51 = subi %c-1, %50 : index
+          %52 = select %47, %51, %50 : index
+          memref.store %46, %17[%37, %52] : memref<64x9xvector<8xf16>, 3>
+          scf.yield
+        } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
+        scf.parallel (%arg4) = (%c0) to (%c1024) step (%c1) {
+          %36 = remi_signed %arg4, %c8 : index
+          %37 = divi_signed %arg4, %c8 : index
+          %38 = muli %36, %c8 : index
+          %39 = addi %arg0, %37 : index
+          %40 = cmpi slt, %38, %c0 : index
+          %41 = subi %c-1, %38 : index
+          %42 = select %40, %41, %38 : index
+          %43 = divi_signed %42, %c8 : index
+          %44 = subi %c-1, %43 : index
+          %45 = select %40, %44, %43 : index
+          %46 = memref.load %4[%39, %45] : memref<1024x128xvector<8xf16>>
+          memref.store %46, %19[%37, %45] : memref<128x9xvector<8xf16>, 3>
+          scf.yield
+        } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
+        gpu.barrier
+        %34:8 = scf.for %arg4 = %c0 to %c960 step %c64 iter_args(%arg5 = %22, %arg6 = %24, %arg7 = %26, %arg8 = %28, %arg9 = %30, %arg10 = %31, %arg11 = %32, %arg12 = %33) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+          scf.parallel (%arg13) = (%c0) to (%c512) step (%c1) {
+            %37 = remi_signed %arg13, %c8 : index
+            %38 = divi_signed %arg13, %c8 : index
+            %39 = muli %37, %c8 : index
+            %40 = addi %arg4, %38 : index
+            %41 = addi %40, %c64 : index
+            %42 = addi %arg1, %39 : index
+            %43 = cmpi slt, %42, %c0 : index
+            %44 = subi %c-1, %42 : index
+            %45 = select %43, %44, %42 : index
+            %46 = divi_signed %45, %c8 : index
+            %47 = subi %c-1, %46 : index
+            %48 = select %43, %47, %46 : index
+            %49 = memref.load %5[%41, %48] : memref<1024x128xvector<8xf16>>
+            %50 = cmpi slt, %39, %c0 : index
+            %51 = subi %c-1, %39 : index
+            %52 = select %50, %51, %39 : index
+            %53 = divi_signed %52, %c8 : index
+            %54 = subi %c-1, %53 : index
+            %55 = select %50, %54, %53 : index
+            memref.store %49, %17[%38, %55] : memref<64x9xvector<8xf16>, 3>
+            scf.yield
+          } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
+          scf.parallel (%arg13) = (%c0) to (%c1024) step (%c1) {
+            %37 = remi_signed %arg13, %c8 : index
+            %38 = divi_signed %arg13, %c8 : index
+            %39 = muli %37, %c8 : index
+            %40 = addi %arg0, %38 : index
+            %41 = addi %arg4, %39 : index
+            %42 = cmpi slt, %41, %c0 : index
+            %43 = subi %c-1, %41 : index
+            %44 = select %42, %43, %41 : index
+            %45 = divi_signed %44, %c8 : index
+            %46 = subi %c-1, %45 : index
+            %47 = select %42, %46, %45 : index
+            %48 = addi %47, %c8 : index
+            %49 = memref.load %4[%40, %48] : memref<1024x128xvector<8xf16>>
+            %50 = cmpi slt, %39, %c0 : index
+            %51 = subi %c-1, %39 : index
+            %52 = select %50, %51, %39 : index
+            %53 = divi_signed %52, %c8 : index
+            %54 = subi %c-1, %53 : index
+            %55 = select %50, %54, %53 : index
+            memref.store %49, %19[%38, %55] : memref<128x9xvector<8xf16>, 3>
+            scf.yield
+          } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
+          %36:8 = scf.for %arg13 = %c0 to %c64 step %c16 iter_args(%arg14 = %arg5, %arg15 = %arg6, %arg16 = %arg7, %arg17 = %arg8, %arg18 = %arg9, %arg19 = %arg10, %arg20 = %arg11, %arg21 = %arg12) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+            %37 = gpu.subgroup_mma_load_matrix %18[%arg2, %arg13] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+            %38 = gpu.subgroup_mma_load_matrix %16[%arg13, %arg3] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+            %39 = gpu.subgroup_mma_compute %37, %38, %arg14 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+            %40 = addi %arg2, %c16 : index
+            %41 = gpu.subgroup_mma_load_matrix %18[%40, %arg13] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+            %42 = gpu.subgroup_mma_load_matrix %16[%arg13, %arg3] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+            %43 = gpu.subgroup_mma_compute %41, %42, %arg15 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+            %44 = addi %arg2, %c32 : index
+            %45 = gpu.subgroup_mma_load_matrix %18[%44, %arg13] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+            %46 = gpu.subgroup_mma_load_matrix %16[%arg13, %arg3] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+            %47 = gpu.subgroup_mma_compute %45, %46, %arg16 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+            %48 = addi %arg2, %c48 : index
+            %49 = gpu.subgroup_mma_load_matrix %18[%48, %arg13] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+            %50 = gpu.subgroup_mma_load_matrix %16[%arg13, %arg3] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+            %51 = gpu.subgroup_mma_compute %49, %50, %arg17 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+            %52 = gpu.subgroup_mma_load_matrix %18[%arg2, %arg13] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+            %53 = addi %arg3, %c16 : index
+            %54 = gpu.subgroup_mma_load_matrix %16[%arg13, %53] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+            %55 = gpu.subgroup_mma_compute %52, %54, %arg18 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+            %56 = gpu.subgroup_mma_load_matrix %18[%40, %arg13] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+            %57 = gpu.subgroup_mma_load_matrix %16[%arg13, %53] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+            %58 = gpu.subgroup_mma_compute %56, %57, %arg19 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+            %59 = gpu.subgroup_mma_load_matrix %18[%44, %arg13] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+            %60 = gpu.subgroup_mma_load_matrix %16[%arg13, %53] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+            %61 = gpu.subgroup_mma_compute %59, %60, %arg20 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+            %62 = gpu.subgroup_mma_load_matrix %18[%48, %arg13] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+            %63 = gpu.subgroup_mma_load_matrix %16[%arg13, %53] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+            %64 = gpu.subgroup_mma_compute %62, %63, %arg21 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+            scf.yield %39, %43, %47, %51, %55, %58, %61, %64 : !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">
+          }
+          scf.yield %36#0, %36#1, %36#2, %36#3, %36#4, %36#5, %36#6, %36#7 : !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">
+        }
+        gpu.barrier
+        %35:8 = scf.for %arg4 = %c0 to %c64 step %c16 iter_args(%arg5 = %34#0, %arg6 = %34#1, %arg7 = %34#2, %arg8 = %34#3, %arg9 = %34#4, %arg10 = %34#5, %arg11 = %34#6, %arg12 = %34#7) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+          %36 = gpu.subgroup_mma_load_matrix %18[%arg2, %arg4] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+          %37 = gpu.subgroup_mma_load_matrix %16[%arg4, %arg3] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+          %38 = gpu.subgroup_mma_compute %36, %37, %arg5 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+          %39 = addi %arg2, %c16 : index
+          %40 = gpu.subgroup_mma_load_matrix %18[%39, %arg4] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+          %41 = gpu.subgroup_mma_load_matrix %16[%arg4, %arg3] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+          %42 = gpu.subgroup_mma_compute %40, %41, %arg6 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+          %43 = addi %arg2, %c32 : index
+          %44 = gpu.subgroup_mma_load_matrix %18[%43, %arg4] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+          %45 = gpu.subgroup_mma_load_matrix %16[%arg4, %arg3] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+          %46 = gpu.subgroup_mma_compute %44, %45, %arg7 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+          %47 = addi %arg2, %c48 : index
+          %48 = gpu.subgroup_mma_load_matrix %18[%47, %arg4] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+          %49 = gpu.subgroup_mma_load_matrix %16[%arg4, %arg3] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+          %50 = gpu.subgroup_mma_compute %48, %49, %arg8 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+          %51 = gpu.subgroup_mma_load_matrix %18[%arg2, %arg4] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+          %52 = addi %arg3, %c16 : index
+          %53 = gpu.subgroup_mma_load_matrix %16[%arg4, %52] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+          %54 = gpu.subgroup_mma_compute %51, %53, %arg9 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+          %55 = gpu.subgroup_mma_load_matrix %18[%39, %arg4] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+          %56 = gpu.subgroup_mma_load_matrix %16[%arg4, %52] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+          %57 = gpu.subgroup_mma_compute %55, %56, %arg10 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+          %58 = gpu.subgroup_mma_load_matrix %18[%43, %arg4] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+          %59 = gpu.subgroup_mma_load_matrix %16[%arg4, %52] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+          %60 = gpu.subgroup_mma_compute %58, %59, %arg11 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+          %61 = gpu.subgroup_mma_load_matrix %18[%47, %arg4] {leadDimension = 72 : index} : memref<128x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+          %62 = gpu.subgroup_mma_load_matrix %16[%arg4, %52] {leadDimension = 72 : index} : memref<64x72xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
+          %63 = gpu.subgroup_mma_compute %61, %62, %arg12 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf32, "COp">
+          scf.yield %38, %42, %46, %50, %54, %57, %60, %63 : !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">
+        }
+        gpu.subgroup_mma_store_matrix %35#0, %memref_2[%20, %21] {leadDimension = 1024 : index} : !gpu.mma_matrix<16x16xf32, "COp">, memref<1024x1024xf32>
+        gpu.subgroup_mma_store_matrix %35#1, %memref_2[%23, %21] {leadDimension = 1024 : index} : !gpu.mma_matrix<16x16xf32, "COp">, memref<1024x1024xf32>
+        gpu.subgroup_mma_store_matrix %35#2, %memref_2[%25, %21] {leadDimension = 1024 : index} : !gpu.mma_matrix<16x16xf32, "COp">, memref<1024x1024xf32>
+        gpu.subgroup_mma_store_matrix %35#3, %memref_2[%27, %21] {leadDimension = 1024 : index} : !gpu.mma_matrix<16x16xf32, "COp">, memref<1024x1024xf32>
+        gpu.subgroup_mma_store_matrix %35#4, %memref_2[%20, %29] {leadDimension = 1024 : index} : !gpu.mma_matrix<16x16xf32, "COp">, memref<1024x1024xf32>
+        gpu.subgroup_mma_store_matrix %35#5, %memref_2[%23, %29] {leadDimension = 1024 : index} : !gpu.mma_matrix<16x16xf32, "COp">, memref<1024x1024xf32>
+        gpu.subgroup_mma_store_matrix %35#6, %memref_2[%25, %29] {leadDimension = 1024 : index} : !gpu.mma_matrix<16x16xf32, "COp">, memref<1024x1024xf32>
+        gpu.subgroup_mma_store_matrix %35#7, %memref_2[%27, %29] {leadDimension = 1024 : index} : !gpu.mma_matrix<16x16xf32, "COp">, memref<1024x1024xf32>
+        scf.yield
+      } {mapping = [{bound = #map, map = #map, processor = 7 : i64}, {bound = #map, map = #map, processor = 6 : i64}]}
       scf.yield
-    } {mapping = [{bound = #map, map = #map, processor = 7 : i64}, {bound = #map, map = #map, processor = 6 : i64}]}
-    scf.yield
-  } {mapping = [{bound = #map, map = #map, processor = 1 : i64}, {bound = #map, map = #map, processor = 0 : i64}]}
-  return
+    } {mapping = [{bound = #map, map = #map, processor = 1 : i64}, {bound = #map, map = #map, processor = 0 : i64}]}
+    %10 = call @rtclock() : () -> f64
+    %11 = gpu.wait async 
+    %12 = gpu.memcpy async [%11] %2, %memref_2 : memref<1024x1024xf32>, memref<1024x1024xf32>
+    gpu.wait [%12]
+    %13 = subf %10, %9 : f64
+    %14 = sitofp %c2147483648_i64 : i64 to f64
+    %15 = divf %14, %13 : f64
+    call @print_flops(%15) : (f64) -> ()
+    return
+  }
+  func private @print_memref_f32(memref<*xf32>)
+  func private @print_flops(f64)
+  func private @rtclock() -> f64
 }
 
-// CHECK-LABEL: func @matmul() {
-// CHECK:   %3 = addi %c1024, %c64 : index
-// CHECK-NEXT:   %4 = subi %3, %c1_4 : index
-// CHECK-NEXT:   %5 = divi_unsigned %4, %c64 : index
-// CHECK-NEXT:   %6 = addi %c1024, %c64 : index
-// CHECK-NEXT:   %7 = subi %6, %c1_4 : index
-// CHECK-NEXT:   %8 = divi_unsigned %7, %c64 : index
-// CHECK-NEXT:   %9 = divi_unsigned %c64, %c32 : index
-// CHECK-NEXT:   %10 = divi_unsigned %c64, %c32 : index
-// CHECK-NEXT:   %11 = muli %9, %10 : index
-// CHECK-NEXT:   %c32_5 = constant 32 : index
-// CHECK-NEXT:   %12 = muli %11, %c32_5 : index
-// CHECK-NEXT:   gpu.launch blocks(%arg0, %arg1, %arg2) in (%arg6 = %8, %arg7 = %5, %arg8 = %c1_0) threads(%arg3, %arg4, %arg5) in (%arg9 = %12, %arg10 = %c1_2, %arg11 = %c1_3) {
-// CHECK-NEXT:     %13 = muli %12, %c1_2 : index
-// CHECK-NEXT:     %14 = muli %arg5, %13 : index
-// CHECK-NEXT:     %15 = muli %arg4, %12 : index
-// CHECK-NEXT:     %16 = addi %14, %15 : index
-// CHECK-NEXT:     %17 = addi %16, %arg3 : index
-// CHECK-NEXT:     %c32_6 = constant 32 : index
-// CHECK-NEXT:     %18 = divi_unsigned %17, %c32_6 : index
-// CHECK-NEXT:     %19 = divi_unsigned %12, %c32_6 : index
-// CHECK-NEXT:     %20 = muli %arg1, %c64 : index
-// CHECK-NEXT:     %21 = addi %c0, %20 : index
-// CHECK-NEXT:     %22 = muli %arg0, %c64 : index
-// CHECK-NEXT:     %23 = addi %c0, %22 : index
-// CHECK-NEXT:     %24 = alloca() : memref<64x64xf16, 3>
-// CHECK-NEXT:     %25 = alloca() : memref<32x64xf16, 3>
-// CHECK-NEXT:     %26 = alloca() : memref<64x32xf16, 3>
-// CHECK-NEXT:     %27 = addi %21, %c64 : index
-// CHECK-NEXT:     %28 = cmpi slt, %27, %c1024 : index
-// CHECK-NEXT:     %29 = select %28, %27, %c1024 : index
-// CHECK-NEXT:     %30 = addi %23, %c64 : index
-// CHECK-NEXT:     %31 = cmpi slt, %30, %c1024 : index
-// CHECK-NEXT:     %32 = select %31, %30, %c1024 : index
-// CHECK-NEXT:     %33 = divi_unsigned %c64, %c32 : index
-// CHECK-NEXT:     %34 = cmpi ule, %19, %33 : index
-// CHECK-NEXT:     %35 = select %34, %19, %33 : index
-// CHECK-NEXT:     %36 = divi_unsigned %19, %35 : index
-// CHECK-NEXT:     %37 = remi_unsigned %18, %35 : index
-// CHECK-NEXT:     %38 = divi_unsigned %18, %35 : index
-// CHECK-NEXT:     %39 = muli %38, %c32 : index
-// CHECK-NEXT:     %40 = muli %c32, %36 : index
-// CHECK-NEXT:     scf.for %arg12 = %39 to %c64 step %40 {
-// CHECK-NEXT:       %41 = muli %37, %c32 : index
-// CHECK-NEXT:       %42 = muli %c32, %35 : index
-// CHECK-NEXT:       scf.for %arg13 = %41 to %c64 step %42 {
-// CHECK-NEXT:         %43 = muli %21, %c-1 : index
-// CHECK-NEXT:         %44 = addi %43, %arg12 : index
-// CHECK-NEXT:         %45 = addi %44, %c16 : index
-// CHECK-NEXT:         %46 = muli %23, %c-1 : index
-// CHECK-NEXT:         %47 = addi %46, %arg13 : index
-// CHECK-NEXT:         %48 = addi %47, %c16 : index
-// CHECK-NEXT:         %49 = gpu.subgroup_mma_load_matrix %24[%44, %47] {leadDimension = 64 : index, operand = "COp"} : memref<64x64xf16, 3> -> !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:         %50 = gpu.subgroup_mma_load_matrix %24[%45, %47] {leadDimension = 64 : index, operand = "COp"} : memref<64x64xf16, 3> -> !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:         %51 = gpu.subgroup_mma_load_matrix %24[%44, %48] {leadDimension = 64 : index, operand = "COp"} : memref<64x64xf16, 3> -> !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:         %52 = gpu.subgroup_mma_load_matrix %24[%45, %48] {leadDimension = 64 : index, operand = "COp"} : memref<64x64xf16, 3> -> !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:         %53:4 = scf.for %arg14 = %c0 to %c1024 step %c32 iter_args(%arg15 = %49, %arg16 = %50, %arg17 = %51, %arg18 = %52) -> (!gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>) {
-// CHECK-NEXT:           %56 = addi %arg14, %c32 : index
-// CHECK-NEXT:           %57 = cmpi slt, %56, %c1024 : index
-// CHECK-NEXT:           %58 = select %57, %56, %c1024 : index
-// CHECK-NEXT:           %59 = addi %23, %c64 : index
-// CHECK-NEXT:           %60 = cmpi slt, %59, %c1024 : index
-// CHECK-NEXT:           %61 = select %60, %59, %c1024 : index
-// CHECK-NEXT:           %62 = addi %21, %c64 : index
-// CHECK-NEXT:           %63 = cmpi slt, %62, %c1024 : index
-// CHECK-NEXT:           %64 = select %63, %62, %c1024 : index
-// CHECK-NEXT:           %65 = addi %arg14, %c32 : index
-// CHECK-NEXT:           %66 = cmpi slt, %65, %c1024 : index
-// CHECK-NEXT:           %67 = select %66, %65, %c1024 : index
-// CHECK-NEXT:           %68 = subi %58, %arg14 : index
-// CHECK-NEXT:           %69 = subi %61, %23 : index
-// CHECK-NEXT:           %70 = muli %68, %69 : index
-// CHECK-NEXT:           scf.for %arg19 = %17 to %70 step %12 {
-// CHECK-NEXT:             %78 = remi_signed %arg19, %69 : index
-// CHECK-NEXT:             %79 = divi_signed %arg19, %69 : index
-// CHECK-NEXT:             %80 = addi %78, %23 : index
-// CHECK-NEXT:             %81 = addi %79, %arg14 : index
-// CHECK-NEXT:             %82 = load %1[%81, %80] : memref<1024x1024xf16>
-// CHECK-NEXT:             %83 = muli %arg14, %c-1 : index
-// CHECK-NEXT:             %84 = addi %83, %81 : index
-// CHECK-NEXT:             %85 = muli %23, %c-1 : index
-// CHECK-NEXT:             %86 = addi %85, %80 : index
-// CHECK-NEXT:             store %82, %25[%84, %86] : memref<32x64xf16, 3>
-// CHECK-NEXT:           }
-// CHECK-NEXT:           %71 = subi %64, %21 : index
-// CHECK-NEXT:           %72 = subi %67, %arg14 : index
-// CHECK-NEXT:           %73 = muli %71, %72 : index
-// CHECK-NEXT:           scf.for %arg19 = %17 to %73 step %12 {
-// CHECK-NEXT:             %78 = remi_signed %arg19, %72 : index
-// CHECK-NEXT:             %79 = divi_signed %arg19, %72 : index
-// CHECK-NEXT:             %80 = addi %78, %arg14 : index
-// CHECK-NEXT:             %81 = addi %79, %21 : index
-// CHECK-NEXT:             %82 = load %0[%81, %80] : memref<1024x1024xf16>
-// CHECK-NEXT:             %83 = muli %21, %c-1 : index
-// CHECK-NEXT:             %84 = addi %83, %81 : index
-// CHECK-NEXT:             %85 = muli %arg14, %c-1 : index
-// CHECK-NEXT:             %86 = addi %85, %80 : index
-// CHECK-NEXT:             store %82, %26[%84, %86] : memref<64x32xf16, 3>
-// CHECK-NEXT:           }
-// CHECK-NEXT:           %74 = addi %arg14, %c32 : index
-// CHECK-NEXT:           %75 = cmpi slt, %74, %c1024 : index
-// CHECK-NEXT:           %76 = select %75, %74, %c1024 : index
-// CHECK-NEXT:           %77:4 = scf.for %arg19 = %arg14 to %76 step %c16 iter_args(%arg20 = %49, %arg21 = %50, %arg22 = %51, %arg23 = %52) -> (!gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>) {
-// CHECK-NEXT:             %78 = muli %arg14, %c-1 : index
-// CHECK-NEXT:             %79 = addi %78, %arg19 : index
-// CHECK-NEXT:             %80 = addi %43, %arg12 : index
-// CHECK-NEXT:             %81 = addi %44, %c16 : index
-// CHECK-NEXT:             %82 = gpu.subgroup_mma_load_matrix %26[%80, %79] {leadDimension = 32 : index, operand = "AOp"} : memref<64x32xf16, 3> -> !gpu.mmafragment<8, vector<2xf16>>
-// CHECK-NEXT:             %83 = gpu.subgroup_mma_load_matrix %26[%81, %79] {leadDimension = 32 : index, operand = "AOp"} : memref<64x32xf16, 3> -> !gpu.mmafragment<8, vector<2xf16>>
-// CHECK-NEXT:             %84 = addi %46, %arg13 : index
-// CHECK-NEXT:             %85 = addi %47, %c16 : index
-// CHECK-NEXT:             %86 = gpu.subgroup_mma_load_matrix %25[%79, %84] {leadDimension = 64 : index, operand = "BOp"} : memref<32x64xf16, 3> -> !gpu.mmafragment<8, vector<2xf16>>
-// CHECK-NEXT:             %87 = gpu.subgroup_mma_compute %82, %86, %49 : !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>> -> !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:             %88 = gpu.subgroup_mma_compute %83, %86, %50 : !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>> -> !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:             %89 = gpu.subgroup_mma_load_matrix %25[%79, %85] {leadDimension = 64 : index, operand = "BOp"} : memref<32x64xf16, 3> -> !gpu.mmafragment<8, vector<2xf16>>
-// CHECK-NEXT:             %90 = gpu.subgroup_mma_compute %82, %89, %51 : !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>> -> !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:             %91 = gpu.subgroup_mma_compute %83, %89, %52 : !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<8, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>> -> !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:             scf.yield %87, %88, %90, %91 : !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:           }
-// CHECK-NEXT:           scf.yield %77#0, %77#1, %77#2, %77#3 : !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>
-// CHECK-NEXT:         }
-// CHECK-NEXT:         %54 = addi %21, %c16 : index
-// CHECK-NEXT:         %55 = addi %23, %c16 : index
-// CHECK-NEXT:         gpu.subgroup_mma_store_matrix %53#0, %2[%21, %23] {leadDimension = 1024 : index} : !gpu.mmafragment<4, vector<2xf16>>, memref<1024x1024xf16>
-// CHECK-NEXT:         gpu.subgroup_mma_store_matrix %53#1, %2[%54, %23] {leadDimension = 1024 : index} : !gpu.mmafragment<4, vector<2xf16>>, memref<1024x1024xf16>
-// CHECK-NEXT:         gpu.subgroup_mma_store_matrix %53#2, %2[%21, %55] {leadDimension = 1024 : index} : !gpu.mmafragment<4, vector<2xf16>>, memref<1024x1024xf16>
-// CHECK-NEXT:         gpu.subgroup_mma_store_matrix %53#3, %2[%54, %55] {leadDimension = 1024 : index} : !gpu.mmafragment<4, vector<2xf16>>, memref<1024x1024xf16>
-// CHECK-NEXT:       }
-// CHECK-NEXT:     }
-// CHECK-NEXT:     gpu.terminator
-// CHECK-NEXT:   }
-// CHECK-NEXT:   return
-// CHECK-NEXT: }
+// CHECK:     gpu.launch blocks({{.*}}) in ({{.*}}) threads({{.*}}) in ({{.*}}) {
+// CHECK:       scf.for %arg12 = %29 to %c128 step %c128 {
+// CHECK:         scf.for %arg13 = %30 to %c64 step %c64 {
+// CHECK:           scf.for %arg14 = %c0 to %c4 step %c1 {
+// CHECK:           } {isCopyLoopNest = true}
+// CHECK:           scf.for %arg14 = %c0 to %c8 step %c1 {
+// CHECK:           } {isCopyLoopNest = true}
+// CHECK:           gpu.barrier
+// CHECK:           %45:8 = scf.for %arg14 = %c0 to %c960 step %c64 iter_args(%arg15 = %33, %arg16 = %35, %arg17 = %37, %arg18 = %39, %arg19 = %41, %arg20 = %42, %arg21 = %43, %arg22 = %44) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+// CHECK:             scf.for %arg23 = %c0 to %c4 step %c1 {
+// CHECK:             } {isCopyLoopNest = true}
+// CHECK:             scf.for %arg23 = %c0 to %c8 step %c1 {
+// CHECK:             } {isCopyLoopNest = true}
+// CHECK:             %47:8 = scf.for %arg23 = %c0 to %c64 step %c16 iter_args(%arg24 = %arg15, %arg25 = %arg16, %arg26 = %arg17, %arg27 = %arg18, %arg28 = %arg19, %arg29 = %arg20, %arg30 = %arg21, %arg31 = %arg22) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+// CHECK:           }
+// CHECK:           gpu.barrier
+// CHECK:           %46:8 = scf.for %arg14 = %c0 to %c64 step %c16 iter_args(%arg15 = %45#0, %arg16 = %45#1, %arg17 = %45#2, %arg18 = %45#3, %arg19 = %45#4, %arg20 = %45#5, %arg21 = %45#6, %arg22 = %45#7) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+// CHECK:           }
+// CHECK:         }
+// CHECK:       }
+// CHECK:       gpu.terminator
+// CHECK:     }
+// CHECK:     return
+// CHECK:   }

@@ -10,21 +10,21 @@ echo "module attributes {gpu.container_module} {
     %c16 = constant 16 : index
     %c0 = constant 0 : index
     %c1 = constant 1 : index
-    %0 = alloc() : memref<$1x$2xf16>
-    %1 = alloc() : memref<$2x$3xf16>
-    %2 = alloc() : memref<$1x$3xf16>
-    %00 = alloc() : memref<$1x$2xf32>
-    %22 = alloc() : memref<$2x$3xf32>
-    %44 = alloc() : memref<$1x$3xf32>
+    %0 = memref.alloc() : memref<$1x$2xf16>
+    %1 = memref.alloc() : memref<$2x$3xf16>
+    %2 = memref.alloc() : memref<$1x$3xf16>
+    %00 = memref.alloc() : memref<$1x$2xf32>
+    %22 = memref.alloc() : memref<$2x$3xf32>
+    %44 = memref.alloc() : memref<$1x$3xf32>
     %c1_1 = constant 1 : index
     %c1_2 = constant 1 : index
     %c1_3 = constant 1 : index
     %c1_4 = constant 1 : index
     %c1_5 = constant 1 : index
     
-    %M = dim %44, %c0 : memref<$1x$3xf32>
-    %N = dim %44, %c1 : memref<$1x$3xf32>
-    %K = dim %00, %c1 : memref<$1x$2xf32>
+    %M = memref.dim %44, %c0 : memref<$1x$3xf32>
+    %N = memref.dim %44, %c1 : memref<$1x$3xf32>
+    %K = memref.dim %00, %c1 : memref<$1x$2xf32>
      
     // Intialize A matrix.
     scf.for %arg0 = %c0 to %M step %c1 {
@@ -35,16 +35,16 @@ echo "module attributes {gpu.container_module} {
         %addm = remi_signed %add, %c16 : index
         %add_int = index_cast %addm : index to i16
         %add_float = sitofp %add_int : i16 to f16
-        store %add_float, %0[%arg0, %arg1] : memref<$1x$2xf16>
+        memref.store %add_float, %0[%arg0, %arg1] : memref<$1x$2xf16>
       }
     }
     
     // Convert fp16 to fp32
     scf.for %arg0 = %c0 to %M step %c1 {
       scf.for %arg1 = %c0 to %K step %c1 {
-        %6 = load %0[%arg0, %arg1] : memref<$1x$2xf16>
+        %6 = memref.load %0[%arg0, %arg1] : memref<$1x$2xf16>
         %7 = fpext %6 : f16 to f32
-        store %7, %00[%arg0, %arg1] : memref<$1x$2xf32>
+        memref.store %7, %00[%arg0, %arg1] : memref<$1x$2xf32>
       }
     }
     
@@ -57,42 +57,42 @@ echo "module attributes {gpu.container_module} {
         %addm = remi_signed %add, %c16 : index
         %add_int = index_cast %addm : index to i16
         %add_float = sitofp %add_int : i16 to f16
-        store %add_float, %1[%arg0, %arg1] : memref<$2x$3xf16>
+        memref.store %add_float, %1[%arg0, %arg1] : memref<$2x$3xf16>
       }
     }
     
     // Convert fp16 to fp32
     scf.for %arg0 = %c0 to %K step %c1 {
       scf.for %arg1 = %c0 to %N step %c1 {
-        %6 = load %1[%arg0, %arg1] : memref<$2x$3xf16>
+        %6 = memref.load %1[%arg0, %arg1] : memref<$2x$3xf16>
         %7 = fpext %6 : f16 to f32
-        store %7, %22[%arg0, %arg1] : memref<$2x$3xf32>
+        memref.store %7, %22[%arg0, %arg1] : memref<$2x$3xf32>
       }
     }
 
     // Intialize the accumulator matrix with zeros.
     scf.for %arg0 = %c0 to %M step %c1 {
       scf.for %arg1 = %c0 to %N step %c1 {
-        store %cst_0, %2[%arg0, %arg1] : memref<$1x$3xf16>
+        memref.store %cst_0, %2[%arg0, %arg1] : memref<$1x$3xf16>
       }
     }
 
     // Convert fp16 to fp32
     scf.for %arg0 = %c0 to %M step %c1 {
       scf.for %arg1 = %c0 to %N step %c1 {
-        %6 = load %2[%arg0, %arg1] : memref<$1x$3xf16>
+        %6 = memref.load %2[%arg0, %arg1] : memref<$1x$3xf16>
         %7 = fpext %6 : f16 to f32
-        store %7, %44[%arg0, %arg1] : memref<$1x$3xf32>
+        memref.store %7, %44[%arg0, %arg1] : memref<$1x$3xf32>
       }
     }
     
-    %111 = memref_cast %00 : memref<$1x$2xf32> to memref<*xf32>
+    %111 = memref.cast %00 : memref<$1x$2xf32> to memref<*xf32>
     gpu.host_register %111 : memref<*xf32>
     
-    %333 = memref_cast %22 : memref<$2x$3xf32> to memref<*xf32>
+    %333 = memref.cast %22 : memref<$2x$3xf32> to memref<*xf32>
     gpu.host_register %333 : memref<*xf32>
     
-    %555 = memref_cast %44 : memref<$1x$3xf32> to memref<*xf32>
+    %555 = memref.cast %44 : memref<$1x$3xf32> to memref<*xf32>
     gpu.host_register %555 : memref<*xf32>
 
     %gridy = divi_unsigned %M, %c32 : index
@@ -115,7 +115,7 @@ echo "module attributes {gpu.container_module} {
     %flops = divf %num_flops_f, %t : f64
     call @print_flops(%flops) : (f64) -> ()
 
-    %out_naive_cast = memref_cast %44 : memref<$1x$3xf32> to memref<*xf32>
+    %out_naive_cast = memref.cast %44 : memref<$1x$3xf32> to memref<*xf32>
     call @print_memref_f32(%out_naive_cast) : (memref<*xf32>) -> ()
     return
   }
@@ -144,12 +144,12 @@ echo "module attributes {gpu.container_module} {
       %c1 = constant 1 : index
       %c0 = constant 0 : index
       scf.for %k = %c0 to %c$2 step %c1 {
-        %a = load %arg2[%15,%k] : memref<$1x$2xf32>
-        %b = load %arg1[%k,%13] : memref<$2x$3xf32>
-        %c = load %arg0[%15, %13] : memref<$1x$3xf32>
+        %a = memref.load %arg2[%15,%k] : memref<$1x$2xf32>
+        %b = memref.load %arg1[%k,%13] : memref<$2x$3xf32>
+        %c = memref.load %arg0[%15, %13] : memref<$1x$3xf32>
         %mul = mulf %a, %b : f32
         %add = addf %c, %mul : f32
-        store %add, %arg0[%15,%13] : memref<$1x$3xf32>
+        memref.store %add, %arg0[%15,%13] : memref<$1x$3xf32>
       }
 
       gpu.return

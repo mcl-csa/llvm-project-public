@@ -1,19 +1,19 @@
-// RUN: mlir-opt %s --canonicalize --affine-loop-tile="num-tiling-levels=2 tile-sizes=64,64,16,32,32,16 relative-indexing=true" --canonicalize -test-gpu-matmul-fast-buffer-placement="matrices=A,B global-allocation=true" --canonicalize --test-specialize-affine-matmul-for-wmma=accum=f32 --canonicalize --test-collapse-affine-parallel --canonicalize --lower-affine --test-gpu-matmul-parallel-loop-mapping --canonicalize --test-convert-matmul-parallel-loops-to-gpu --gpu-kernel-outlining --test-gpu-mark-global-as-workgroup-memory --canonicalize --convert-scf-to-std | mlir-cuda-runner -O3 --sm=sm_75 --max-reg-per-thread=100 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" --shared-libs=%linalg_test_lib_dir/libmlir_cuda_runtime%shlibext --shared-libs=%linalg_test_lib_dir/libmlir_runner_utils%shlibext --shared-libs=%linalg_test_lib_dir/libmlir_c_runner_utils%shlibext --entry-point-result=void
+// RUN: mlir-opt %s --canonicalize --affine-loop-tile="num-tiling-levels=2 tile-sizes=128,64,64,64,32,16 relative-indexing=true" --canonicalize --canonicalize -test-gpu-matmul-fast-buffer-placement="matrices=A,B global-allocation=true" --canonicalize --test-mark-parallel-loops --test-specialize-affine-matmul-for-wmma="accum=f32 padding-a=8 padding-b=8" --canonicalize --cse --test-split-compute-loop  --canonicalize --test-gpu-matmul-barrier-insertion  --test-normalize-copy-loops --canonicalize --cse --test-vectorize-gpu-matmul-copy-loops="load-store-width=128" --canonicalize --test-collapse-affine-parallel --canonicalize  --lower-affine --test-gpu-matmul-parallel-loop-mapping --canonicalize --test-convert-matmul-parallel-loops-to-gpu --cse --test-unroll-and-delay-copies --canonicalize -gpu-kernel-outlining  --test-gpu-mark-global-as-workgroup-memory --canonicalize --cse --convert-scf-to-std
 
 // nvprof could be used by using '... | nvprof --print-gpu-trace mlir-cuda-runner ..'
 
 func @main() {
   %c16_f = constant 16.0e+00 : f16
   %f0 = constant 0.0e+00 : f32
-  %A = alloc() : memref<4096x4096xf16>
-  %B = alloc() : memref<4096x4096xf16>
-  %C = alloc() : memref<4096x4096xf32>
+  %A = memref.alloc() : memref<4096x4096xf16>
+  %B = memref.alloc() : memref<4096x4096xf16>
+  %C = memref.alloc() : memref<4096x4096xf32>
   
   %c0 = constant 0 : index
   %c1 = constant 1 : index
-  %M = dim %A, %c0: memref<4096x4096xf16> 
-  %N = dim %B, %c1: memref<4096x4096xf16> 
-  %K = dim %A, %c1: memref<4096x4096xf16> 
+  %M = memref.dim %A, %c0: memref<4096x4096xf16> 
+  %N = memref.dim %B, %c1: memref<4096x4096xf16> 
+  %K = memref.dim %A, %c1: memref<4096x4096xf16> 
   
   // Intialize the Input matrix A.
   scf.for %arg0 = %c0 to %M step %c1 {
@@ -22,7 +22,7 @@ func @main() {
       %add_int = index_cast %add : index to i16
       %add_float = sitofp %add_int : i16 to f16
       %rem = remf %add_float, %c16_f : f16 
-      store %rem, %A[%arg0, %arg1] : memref<4096x4096xf16>
+      memref.store %rem, %A[%arg0, %arg1] : memref<4096x4096xf16>
     }
   }
 
@@ -33,14 +33,14 @@ func @main() {
       %add_int = index_cast %add : index to i16
       %add_float = sitofp %add_int : i16 to f16
       %rem = remf %add_float, %c16_f : f16 
-      store %rem, %B[%arg0, %arg1] : memref<4096x4096xf16>
+      memref.store %rem, %B[%arg0, %arg1] : memref<4096x4096xf16>
     }
   }
 
   // Intialize C matrix with zeros.
   scf.for %arg0 = %c0 to %M step %c1 {
     scf.for %arg1 = %c0 to %N step %c1 {
-      store %f0, %C[%arg0, %arg1] : memref<4096x4096xf32>
+      memref.store %f0, %C[%arg0, %arg1] : memref<4096x4096xf32>
     }
   }
   
@@ -94,8 +94,7 @@ func @main() {
   %flops = divf %num_flops_f, %t : f64
   call @print_flops(%flops) : (f64) -> ()
   
-  %22 = memref_cast %C : memref<4096x4096xf32> to memref<*xf32>
-  //call @print_memref_f32(%22) : (memref<*xf32>) -> ()
+  %22 = memref.cast %C : memref<4096x4096xf32> to memref<*xf32>
   
   return
 }
