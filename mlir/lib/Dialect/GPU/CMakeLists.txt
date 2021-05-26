@@ -33,6 +33,7 @@ add_mlir_dialect_library(MLIRGPU
   LINK_COMPONENTS
   Core
   MC
+  Target
   ${NVPTX_LIBS}
   ${AMDGPU_LIBS}
 
@@ -58,6 +59,8 @@ add_mlir_dialect_library(MLIRGPU
   MLIRSupport
   MLIRTransformUtils
   )
+
+add_dependencies(MLIRGPUToGPURuntimeTransforms LLVMTarget)
 
 if(MLIR_ENABLE_CUDA_RUNNER)
   if(NOT MLIR_ENABLE_CUDA_CONVERSIONS)

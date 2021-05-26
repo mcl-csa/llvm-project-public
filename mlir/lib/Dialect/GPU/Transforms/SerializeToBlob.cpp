@@ -17,6 +17,7 @@
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/Support/CodeGen.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
@@ -57,6 +58,9 @@ void gpu::SerializeToBlobPass::runOnOperation() {
   std::unique_ptr<llvm::TargetMachine> targetMachine = createTargetMachine();
   if (!targetMachine)
     return signalPassFailure();
+
+  // Set opt level to `Aggressive`.
+  targetMachine->setOptLevel(llvm::CodeGenOpt::Aggressive);
 
   std::string targetISA = translateToISA(*llvmModule, *targetMachine);
 
