@@ -120,7 +120,9 @@ func @non_affine_load() {
 // CHECK-LABEL: for_with_minmax
 func @for_with_minmax(%m: memref<?xf32>, %lb0: index, %lb1: index,
                       %ub0: index, %ub1: index) {
-  // CHECK: affine.parallel (%{{.*}}) = (max(%{{.*}}, %{{.*}})) to (min(%{{.*}}, %{{.*}}))
+  // CHECK: %[[lb:.*]] = affine.max
+  // CHECK: %[[ub:.*]] = affine.min
+  // CHECK: affine.parallel (%{{.*}}) = (%[[lb]]) to (%[[ub]])
   affine.for %i = max affine_map<(d0, d1) -> (d0, d1)>(%lb0, %lb1)
           to min affine_map<(d0, d1) -> (d0, d1)>(%ub0, %ub1) {
     affine.load %m[%i] : memref<?xf32>
@@ -131,9 +133,12 @@ func @for_with_minmax(%m: memref<?xf32>, %lb0: index, %lb1: index,
 // CHECK-LABEL: nested_for_with_minmax
 func @nested_for_with_minmax(%m: memref<?xf32>, %lb0: index,
                              %ub0: index, %ub1: index) {
-  // CHECK: affine.parallel (%[[I:.*]]) =
+  // CHECK: affine.parallel
   affine.for %j = 0 to 10 {
-    // CHECK: affine.parallel (%{{.*}}) = (max(%{{.*}}, %[[I]])) to (min(%{{.*}}, %{{.*}}))
+    // Cannot parallelize the inner loop because we would need to compute
+    // affine.max for its lower bound inside the loop, and that is not (yet)
+    // considered as a valid affine dimension.
+    // CHECK: affine.for
     affine.for %i = max affine_map<(d0, d1) -> (d0, d1)>(%lb0, %j)
             to min affine_map<(d0, d1) -> (d0, d1)>(%ub0, %ub1) {
       affine.load %m[%i] : memref<?xf32>
@@ -231,43 +236,6 @@ func @use_in_backward_slice() {
   }
   return
 // REDUCE: }
-}
-
-// CHECK-LABEL:func @preserve_attributes
-func @preserve_attributes(){
-  %a = memref.alloc() : memref<1024x1024xf16>
-  %b = memref.alloc() : memref<1024x1024xf16>
-  %c = memref.alloc() : memref<1024x1024xf16>
-  affine.for %i = 0 to 1024 {
-    affine.for %j = 0 to 1024 {
-      affine.for %k = 0 to 1024 {
-        %0 = affine.load %a[%i, %k] : memref<1024x1024xf16>
-        %1 = affine.load %b[%k, %j] : memref<1024x1024xf16>
-        %2 = affine.load %c[%i, %j] : memref<1024x1024xf16>
-        %4 = mulf %0, %1 : f16
-        affine.store %4, %c[%i, %j] : memref<1024x1024xf16>
-      }
-    }
-// CHECK: {isComputeLoopNest = true, lower_bound = #map{{.*}}, step = {{.*}} : index, upper_bound = #map{{.*}}}
-  } {isComputeLoopNest = true}
-  return
-}
-
-// REDUCE-LABEL: @nested_min_max
-// CHECK-LABEL: @nested_min_max
-// CHECK: (%{{.*}}, %[[LB0:.*]]: index, %[[UB0:.*]]: index, %[[UB1:.*]]: index)
-func @nested_min_max(%m: memref<?xf32>, %lb0: index,
-                     %ub0: index, %ub1: index) {
-  // CHECK: affine.parallel (%[[J:.*]]) =
-  affine.for %j = 0 to 10 {
-    // CHECK: affine.parallel (%{{.*}}) = (max(%[[LB0]], %[[J]]))
-    // CHECK:                          to (min(%[[UB0]], %[[UB1]]))
-    affine.for %i = max affine_map<(d0, d1) -> (d0, d1)>(%lb0, %j)
-            to min affine_map<(d0, d1) -> (d0, d1)>(%ub0, %ub1) {
-      affine.load %m[%i] : memref<?xf32>
-    }
-  }
-  return
 }
 
 // CHECK-LABEL:func @preserve_attributes

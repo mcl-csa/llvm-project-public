@@ -1554,25 +1554,6 @@ public:
     return success();
   }
 
-  /// Parse an AffineExpr of SSA ids.
-  ParseResult
-  parseAffineExprOfSSAIds(SmallVectorImpl<OperandType> &dimOperands,
-                          SmallVectorImpl<OperandType> &symbOperands,
-                          AffineExpr &expr) override {
-    auto parseElement = [&](bool isSymbol) -> ParseResult {
-      OperandType operand;
-      if (parseOperand(operand))
-        return failure();
-      if (isSymbol)
-        symbOperands.push_back(operand);
-      else
-        dimOperands.push_back(operand);
-      return success();
-    };
-
-    return parser.parseAffineExprOfSSAIds(expr, parseElement);
-  }
-
   //===--------------------------------------------------------------------===//
   // Region Parsing
   //===--------------------------------------------------------------------===//
