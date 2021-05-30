@@ -138,7 +138,8 @@ bool mlir::isLoopMemoryParallel(AffineForOp forOp) {
   auto walkResult = forOp.walk([&](Operation *op) -> WalkResult {
     if (isa<AffineReadOpInterface, AffineWriteOpInterface>(op))
       loadAndStoreOps.push_back(op);
-    else if (!isa<AffineForOp, AffineYieldOp, AffineIfOp>(op) &&
+    else if (!isa<AffineForOp, AffineYieldOp, AffineIfOp, memref::AllocOp>(
+                 op) &&
              !MemoryEffectOpInterface::hasNoEffect(op))
       return WalkResult::interrupt();
 
@@ -152,19 +153,48 @@ bool mlir::isLoopMemoryParallel(AffineForOp forOp) {
   // Dep check depth would be number of enclosing loops + 1.
   unsigned depth = getNestingDepth(forOp) + 1;
 
-  // Check dependences between all pairs of ops in 'loadAndStoreOps'.
-  for (auto *srcOp : loadAndStoreOps) {
-    MemRefAccess srcAccess(srcOp);
-    for (auto *dstOp : loadAndStoreOps) {
-      MemRefAccess dstAccess(dstOp);
+  // Check dependences between all pairs of ops in 'loadAndStoreOpInsts'.
+  for (auto *srcOpInst : loadAndStoreOps) {
+    MemRefAccess srcAccess(srcOpInst);
+    for (auto *dstOpInst : loadAndStoreOps) {
+      MemRefAccess dstAccess(dstOpInst);
       FlatAffineConstraints dependenceConstraints;
+      SmallVector<DependenceComponent, 2> dependenceComponents;
       DependenceResult result = checkMemrefAccessDependence(
           srcAccess, dstAccess, depth, &dependenceConstraints,
-          /*dependenceComponents=*/nullptr);
-      if (result.value != DependenceResult::NoDependence)
-        return false;
+          &dependenceComponents);
+      if (result.value != DependenceResult::NoDependence) {
+        // Depth of defining op inside the forOp.
+        int64_t defOpDepth = -1;
+
+        // Depth of the first non-zero dependence.
+        unsigned depDepth = std::numeric_limits<unsigned>::max();
+
+        // Find the depth of defining op.
+        if (auto defOp = srcAccess.memref.getDefiningOp())
+          if (defOp->getParentOfType<AffineForOp>())
+            defOpDepth = getNestingDepth(defOp);
+
+        // Check if the depth of the first dependence carrying loop is less than
+        // the defining op(alloc). If yes, then there is a dependence,
+        // else the dependence is not present because the semantics dictate that
+        // a new buffer for that memref will be created whenever the dependence
+        // carrying loop progresses in the direction of the dependence.
+        for (unsigned i = 0, e = dependenceComponents.size(); i < e; ++i) {
+          if ((dependenceComponents[i].lb.hasValue() &&
+               dependenceComponents[i].lb.getValue() != 0))
+            depDepth = std::min(depDepth, i);
+          if ((dependenceComponents[i].ub.hasValue() &&
+               dependenceComponents[i].ub.getValue() != 0))
+            depDepth = std::min(depDepth, i);
+        }
+
+        if (defOpDepth <= depDepth)
+          return false;
+      }
     }
   }
+
   return true;
 }
 
