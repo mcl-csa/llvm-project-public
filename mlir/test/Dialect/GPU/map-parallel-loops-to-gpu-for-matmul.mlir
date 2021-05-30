@@ -82,11 +82,11 @@ func @matmul() {
           %53 = addi %21, %arg3 : index
           %54 = addi %22, %c16 : index
           %55 = gpu.subgroup_mma_load_matrix %4[%49, %48] {operand = "BOp", leadDimension = 64 : index} : memref<32x64xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
-          %56 = gpu.subgroup_mma_compute %51, %55, %24 :!gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp">, !gpu.mma_matrix<16x16xf16, "COp"> -> !gpu.mma_matrix<16x16xf16, "COp">
-          %57 = gpu.subgroup_mma_compute %52, %55, %25 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp">, !gpu.mma_matrix<16x16xf16, "COp"> -> !gpu.mma_matrix<16x16xf16, "COp">
+          %56 = gpu.subgroup_mma_compute %51, %55, %24 :!gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf16, "COp">
+          %57 = gpu.subgroup_mma_compute %52, %55, %25 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf16, "COp">
           %58 = gpu.subgroup_mma_load_matrix %4[%48, %54] {operand = "BOp", leadDimension = 64 : index} : memref<32x64xf16, 3> -> !gpu.mma_matrix<16x16xf16, "BOp">
-          %59 = gpu.subgroup_mma_compute %51, %58, %26 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp">, !gpu.mma_matrix<16x16xf16, "COp"> -> !gpu.mma_matrix<16x16xf16, "COp">
-          %60 = gpu.subgroup_mma_compute %52, %58, %27 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp">, !gpu.mma_matrix<16x16xf16, "COp"> -> !gpu.mma_matrix<16x16xf16, "COp">
+          %59 = gpu.subgroup_mma_compute %51, %58, %26 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf16, "COp">
+          %60 = gpu.subgroup_mma_compute %52, %58, %27 : !gpu.mma_matrix<16x16xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf16, "COp">
           scf.yield %56, %57, %59, %60 : !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">
         }
         scf.yield %46#0, %46#1, %46#2, %46#3 : !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">, !gpu.mma_matrix<16x16xf16, "COp">
