@@ -100,12 +100,19 @@ SerializeToCubinPass::serializeISA(const std::string &isa) {
                                     &linkState));
 
   auto kernelName = getOperation().getName().str();
+
+  CUjit_option extraJitOptions[] = {CU_JIT_MAX_REGISTERS,
+                                    CU_JIT_OPTIMIZATION_LEVEL};
+  void *extraJitOptionsVals[] = {
+      reinterpret_cast<void *>(this->maxRegPerThread.getValue()),
+      reinterpret_cast<void *>(this->cuJitOptLevel.getValue())};
+
   RETURN_ON_CUDA_ERROR(cuLinkAddData(
       linkState, CUjitInputType::CU_JIT_INPUT_PTX,
       const_cast<void *>(static_cast<const void *>(isa.c_str())), isa.length(),
-      kernelName.c_str(), 0, /* number of jit options */
-      nullptr,               /* jit options */
-      nullptr                /* jit option values */
+      kernelName.c_str(), 2, /* number of jit options */
+      extraJitOptions,       /* jit options */
+      extraJitOptionsVals    /* jit option values */
       ));
 
   void *cubinData;
