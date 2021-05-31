@@ -474,6 +474,7 @@ static void findTileSizes(ParallelOp parallelOp) {
     if (op.getNumLoops() == 2 && op != parallelOp) {
       ArrayAttr mapping =
           op->getAttrOfType<ArrayAttr>(gpu::getMappingAttrName());
+      assert(mapping && "expected mapping attribute");
       for (auto attr : mapping) {
         auto annotation = attr.dyn_cast<gpu::ParallelLoopDimMapping>();
         if ((gpu::getProcessor(annotation) > gpu::Processor::ThreadZ) &&
