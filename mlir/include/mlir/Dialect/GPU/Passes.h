@@ -77,6 +77,15 @@ protected:
       *this, "gpu-binary-annotation",
       llvm::cl::desc("Annotation attribute string for GPU binary"),
       llvm::cl::init(getDefaultGpuBinaryAnnotation())};
+
+  Option<unsigned> maxRegPerThread{
+      *this, "max-reg-per-thread",
+      llvm::cl::desc("Max number of registers that a thread may use"),
+      llvm::cl::init(255)};
+
+  Option<unsigned> cuJitOptLevel{
+      *this, "cu-jit-opt-level",
+      llvm::cl::desc("CU JIT optimization level to set"), llvm::cl::init(4)};
 };
 } // namespace gpu
 
