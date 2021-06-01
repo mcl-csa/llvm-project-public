@@ -127,7 +127,7 @@ void AffineVectorize::runOnFunction() {
     LLVM_DEBUG(llvm::dbgs() << "\n******************************************");
     LLVM_DEBUG(llvm::dbgs() << "\n[affine-vect] Vectorizing loop\n");
     LLVM_DEBUG(loop->dump());
-    loopVectorize(cast<AffineForOp>(loop), clSimdWidth);
+    (void)loopVectorize(cast<AffineForOp>(loop), clSimdWidth);
   }
   LLVM_DEBUG(llvm::dbgs() << "\n");
 }
