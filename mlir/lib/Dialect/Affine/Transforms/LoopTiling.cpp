@@ -41,9 +41,11 @@ struct LoopTiling : public AffineLoopTilingBase<LoopTiling> {
   void runOnFunction() override;
   void getTileSizes(ArrayRef<AffineForOp> band, unsigned tilingLevelIndex,
                     SmallVectorImpl<unsigned> *tileSizes);
+  mlir::LogicalResult checkTileSizesValidity(FuncOp func);
 
-  /// Default tile size if nothing is provided.
-  constexpr static unsigned kDefaultTileSize = 4;
+  /// Default tile size is chosen to be 16 because the wmma intrinsic requires
+  /// it be 16 or more.
+  constexpr static unsigned kDefaultTileSize = 16;
 
   /// Default tiling levels if nothing is provided.
   constexpr static unsigned kDefaultNumTilingLevels = 1;
@@ -180,16 +182,45 @@ void LoopTiling::getTileSizes(ArrayRef<AffineForOp> band,
     adjustToDivisorsOfTripCounts(band, tileSizes);
 }
 
+/// Checks the validity of tile sizes. There are two conditions for tile sizes
+/// to be valid: 1.) The thread block level tile size must be a multiple of warp
+/// level tile size and strictly greater than warp level tile size. 2.) The warp
+/// tile size must be at least 16 for each of the dimensions.
+LogicalResult LoopTiling::checkTileSizesValidity(FuncOp func) {
+  auto checkCondition = [](unsigned tbDim, unsigned wDim, FuncOp func,
+                           Location loc,
+                           const ListOption<unsigned> &tileSizes) {
+    if (tileSizes[wDim] < 16)
+      func.emitError("warp level tile size must be at least 16");
+    if (tileSizes[tbDim] <= tileSizes[wDim] ||
+        (tileSizes[tbDim] % tileSizes[wDim] != 0))
+      func.emitError(
+          "thread block level tile size must be greater than the warp level "
+          "tile size and it must be a multiple of warp level tile size");
+  };
+  if (tileSizes.size() > 3)
+    checkCondition(0, 3, func, func.getLoc(), tileSizes);
+  if (tileSizes.size() > 4)
+    checkCondition(1, 4, func, func.getLoc(), tileSizes);
+  if (tileSizes.size() > 5)
+    checkCondition(2, 5, func, func.getLoc(), tileSizes);
+  return LogicalResult::success();
+}
+
 void LoopTiling::runOnFunction() {
   // Bands of loops to tile.
   std::vector<SmallVector<AffineForOp, 6>> bands;
-  getTileableBands(getFunction(), &bands);
+  FuncOp func = getFunction();
+  getTileableBands(func, &bands);
 
   // Number of times to tile a band.
   unsigned numTilingLevels;
   numTilingLevels =
       tilingLevels ? tilingLevels : LoopTiling::kDefaultNumTilingLevels;
-
+  // Check for tile sizes validity only if the tiling levels is greater than
+  // one and perform tiling only if the tile sizes are valid.
+  if (numTilingLevels > 1 && failed(checkTileSizesValidity(func)))
+    return;
   // Tile each band.
   for (auto &band : bands) {
     unsigned bandSize = band.size();
@@ -198,8 +229,8 @@ void LoopTiling::runOnFunction() {
     // Tile the band `numTilingLevels` times.
     for (unsigned curTilingLevel = 0; curTilingLevel < numTilingLevels;
          ++curTilingLevel) {
-      // Set up tile sizes; fill missing tile sizes at the end with default tile
-      // size or tileSize if one was provided.
+      // Set up tile sizes; fill missing tile sizes at the end with default
+      // tile size or tileSize if one was provided.
       SmallVector<unsigned, 6> tileSizes;
       getTileSizes(band, curTilingLevel, &tileSizes);
       if (llvm::DebugFlag) {
@@ -208,8 +239,8 @@ void LoopTiling::runOnFunction() {
           diag << tSize << ' ';
         diag << "] for tiling level " << curTilingLevel << "\n";
       }
-      // If not the first level of tiling then take out the loops to tile next
-      // form the already tiled loop nest.
+      // If not the first level of tiling then take out the loops to tile
+      // next form the already tiled loop nest.
       if (curTilingLevel != 0) {
         band.clear();
         band.insert(band.begin(), tiledNest.begin() + bandSize,
@@ -218,8 +249,8 @@ void LoopTiling::runOnFunction() {
       if (failed(tilePerfectlyNested(band, tileSizes, &tiledNest,
                                      this->hasToDoRelativeIndexing)))
         return signalPassFailure();
-      // Separate full and partial tiles. Separation only supported at the last
-      // level of tiling.
+      // Separate full and partial tiles. Separation only supported at the
+      // last level of tiling.
       if (separate && (curTilingLevel == numTilingLevels - 1)) {
         auto intraTileLoops =
             MutableArrayRef<AffineForOp>(tiledNest).drop_front(band.size());
