@@ -1,6 +1,7 @@
 add_mlir_library(MLIRTransformUtils
   DialectConversion.cpp
   FoldUtils.cpp
+  GpuUtils.cpp
   GreedyPatternRewriteDriver.cpp
   InliningUtils.cpp
   LoopFusionUtils.cpp

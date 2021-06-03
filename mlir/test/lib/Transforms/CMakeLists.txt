@@ -29,6 +29,7 @@ add_mlir_library(MLIRTestTransforms
   MLIRAffineTransforms
   MLIRTestDialect
   MLIRTransforms
+  MLIRTransformUtils
   MLIRGPU
   )
 
