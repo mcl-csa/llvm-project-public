@@ -1,8 +1,8 @@
 // RUN: mlir-opt %s --test-gpu-matmul-parallel-loop-mapping --canonicalize
 
 module  {
-  global_memref @asmem : memref<64x64xf16, 3>
-  global_memref @bsmem : memref<64x64xf16, 3>
+  memref.global @asmem : memref<64x64xf16, 3>
+  memref.global @bsmem : memref<64x64xf16, 3>
   func @main() {
     %c32 = constant 32 : index
     %c1024 = constant 1024 : index
@@ -11,18 +11,18 @@ module  {
     %c0 = constant 0 : index
     %c64 = constant 64 : index
     %c16 = constant 16 : index
-    %0 = alloc() : memref<1024x1024xf16>
-    %1 = alloc() : memref<1024x1024xf16>
-    %2 = alloc() : memref<1024x1024xf32>
-    %3 = memref_cast %0 : memref<1024x1024xf16> to memref<*xf16>
+    %0 = memref.alloc() : memref<1024x1024xf16>
+    %1 = memref.alloc() : memref<1024x1024xf16>
+    %2 = memref.alloc() : memref<1024x1024xf32>
+    %3 = memref.cast %0 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %3 : memref<*xf16>
-    %4 = memref_cast %1 : memref<1024x1024xf16> to memref<*xf16>
+    %4 = memref.cast %1 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %4 : memref<*xf16>
-    %5 = memref_cast %2 : memref<1024x1024xf32> to memref<*xf32>
+    %5 = memref.cast %2 : memref<1024x1024xf32> to memref<*xf32>
     gpu.host_register %5 : memref<*xf32>
     scf.parallel (%arg0, %arg1) = (%c0, %c0) to (%c1024, %c1024) step (%c64, %c64) {
-      %6 = get_global_memref @asmem : memref<64x64xf16, 3>
-      %7 = get_global_memref @bsmem : memref<64x64xf16, 3>
+      %6 = memref.get_global @asmem : memref<64x64xf16, 3>
+      %7 = memref.get_global @bsmem : memref<64x64xf16, 3>
       scf.parallel (%arg2, %arg3) = (%c0, %c0) to (%c64, %c64) step (%c32, %c32) {
         %8 = addi %arg0, %arg2 : index
         %9 = addi %arg1, %arg3 : index
@@ -44,23 +44,23 @@ module  {
           %25 = addi %arg4, %c64 : index
           %26 = addi %arg1, %c64 : index
           scf.parallel (%arg9, %arg10) = (%arg4, %arg1) to (%25, %26) step (%c1, %c1) {
-            %30 = load %1[%arg9, %arg10] : memref<1024x1024xf16>
+            %30 = memref.load %1[%arg9, %arg10] : memref<1024x1024xf16>
             %31 = muli %arg4, %c-1 : index
             %32 = addi %31, %arg9 : index
             %33 = muli %arg1, %c-1 : index
             %34 = addi %33, %arg10 : index
-            store %30, %6[%32, %34] : memref<64x64xf16, 3>
+            memref.store %30, %6[%32, %34] : memref<64x64xf16, 3>
             scf.yield
           }{isCopyLoopNest = true}
           %27 = addi %arg0, %c64 : index
           %28 = addi %arg4, %c64 : index
           scf.parallel (%arg9, %arg10) = (%arg0, %arg4) to (%27, %28) step (%c1, %c1) {
-            %30 = load %0[%arg9, %arg10] : memref<1024x1024xf16>
+            %30 = memref.load %0[%arg9, %arg10] : memref<1024x1024xf16>
             %31 = muli %arg0, %c-1 : index
             %32 = addi %31, %arg9 : index
             %33 = muli %arg4, %c-1 : index
             %34 = addi %33, %arg10 : index
-            store %30, %7[%32, %34] : memref<64x64xf16, 3>
+            memref.store %30, %7[%32, %34] : memref<64x64xf16, 3>
             scf.yield
           }{isCopyLoopNest = true}
           gpu.barrier

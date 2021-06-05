@@ -15,10 +15,10 @@ module attributes {gpu.container_module}  {
     %c4_f = constant 4.0e+00 : f16
     %c16 = constant 16 : index
     %c128 = constant 128 : index
-    %A = alloc() : memref<1024x1024xf16>
-    %B = alloc() : memref<1024x1024xf16>
-    %C = alloc() : memref<1024x1024xf16>
-    %out = alloc() : memref<1024x1024xf32>
+    %A = memref.alloc() : memref<1024x1024xf16>
+    %B = memref.alloc() : memref<1024x1024xf16>
+    %C = memref.alloc() : memref<1024x1024xf16>
+    %out = memref.alloc() : memref<1024x1024xf32>
 
     // Initalize the input matrix A.
     scf.for %arg0 = %c0 to %c1024 step %c1 {
@@ -26,8 +26,8 @@ module attributes {gpu.container_module}  {
         %add = addi %arg0, %arg1 : index
         %add_int = index_cast %add : index to i16
         %add_float = sitofp %add_int : i16 to f16
-        %rem = remf %add_float, %c4_f : f16 
-        store %rem, %A[%arg0, %arg1] : memref<1024x1024xf16>
+        %rem = remf %add_float, %c4_f : f16
+        memref.store %rem, %A[%arg0, %arg1] : memref<1024x1024xf16>
       }
     }
 
@@ -37,34 +37,34 @@ module attributes {gpu.container_module}  {
         %add = addi %arg0, %arg1 : index
         %add_int = index_cast %add : index to i16
         %add_float = sitofp %add_int : i16 to f16
-        %rem = remf %add_float, %c4_f : f16 
-        store %rem, %B[%arg0, %arg1] : memref<1024x1024xf16>
+        %rem = remf %add_float, %c4_f : f16
+        memref.store %rem, %B[%arg0, %arg1] : memref<1024x1024xf16>
       }
     }
 
     // Intialize C matrix with zeros.
     scf.for %arg0 = %c0 to %c1024 step %c1 {
       scf.for %arg1 = %c0 to %c1024 step %c1 {
-        store %cst_0, %C[%arg0, %arg1] : memref<1024x1024xf16>
+        memref.store %cst_0, %C[%arg0, %arg1] : memref<1024x1024xf16>
       }
     }
 
-    %3 = memref_cast %A : memref<1024x1024xf16> to memref<*xf16>
+    %3 = memref.cast %A : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %3 : memref<*xf16>
-    %4 = memref_cast %B : memref<1024x1024xf16> to memref<*xf16>
+    %4 = memref.cast %B : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %4 : memref<*xf16>
-    %5 = memref_cast %C : memref<1024x1024xf16> to memref<*xf16>
+    %5 = memref.cast %C : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %5 : memref<*xf16>
-    %6 = memref_cast %out : memref<1024x1024xf32> to memref<*xf32>
+    %6 = memref.cast %out : memref<1024x1024xf32> to memref<*xf32>
     gpu.host_register %6 : memref<*xf32>
 
     %t_start = call @rtclock() : () -> (f64)
     gpu.launch_func  @main_kernel::@main_kernel blocks in (%c16, %c16, %c1) threads in (%c128, %c1, %c1) args(%C : memref<1024x1024xf16>, %B : memref<1024x1024xf16>, %A : memref<1024x1024xf16>)
     %t_end = call @rtclock() : () -> (f64)
 
-    %M = dim %C, %c0 : memref<1024x1024xf16>
-    %N = dim %C, %c1 : memref<1024x1024xf16>
-    %K = dim %A, %c1 : memref<1024x1024xf16>
+    %M = memref.dim %C, %c0 : memref<1024x1024xf16>
+    %N = memref.dim %C, %c1 : memref<1024x1024xf16>
+    %K = memref.dim %A, %c1 : memref<1024x1024xf16>
 
     %t = subf %t_end, %t_start : f64
     %f1 = muli %M, %N : index
@@ -78,12 +78,12 @@ module attributes {gpu.container_module}  {
     %num_flops_f = sitofp %num_flops_i : i64 to f64
     %flops = divf %num_flops_f, %t : f64
     call @print_flops(%flops) : (f64) -> ()
-    
+
     scf.for %arg0 = %c0 to %c1024 step %c1 {
       scf.for %arg1 = %c0 to %c1024 step %c1 {
         %18 = load %C[%arg0, %arg1] : memref<1024x1024xf16>
         %19 = fpext %18 : f16 to f32
-        store %19, %out[%arg0, %arg1] : memref<1024x1024xf32>
+        memref.store %19, %out[%arg0, %arg1] : memref<1024x1024xf32>
       }
     }
 
@@ -150,7 +150,7 @@ module attributes {gpu.container_module}  {
               %52 = addi %51, %49 : index
               %53 = muli %11, %c-1 : index
               %54 = addi %53, %48 : index
-              store %50, %12[%52, %54] : memref<64x64xf16, 3>
+              memref.store %50, %12[%52, %54] : memref<64x64xf16, 3>
             }
             %40 = addi %10, %c64 : index
             %41 = addi %arg5, %c64 : index
@@ -167,7 +167,7 @@ module attributes {gpu.container_module}  {
               %52 = addi %51, %49 : index
               %53 = muli %arg5, %c-1 : index
               %54 = addi %53, %48 : index
-              store %50, %13[%52, %54] : memref<64x64xf16, 3>
+              memref.store %50, %13[%52, %54] : memref<64x64xf16, 3>
             }
             gpu.barrier
             %45:4 = scf.for %arg10 = %c0 to %c64 step %c16 iter_args(%arg11 = %arg6, %arg12 = %arg7, %arg13 = %arg8, %arg14 = %arg9) -> (!gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>, !gpu.mmafragment<4, vector<2xf16>>) {

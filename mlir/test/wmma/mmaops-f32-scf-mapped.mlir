@@ -2,10 +2,10 @@
 
 #map = affine_map<(d0) -> (d0)>
 module  {
-  global_memref "public" @frag_A : memref<128x64xf16, 3>
-  global_memref "public" @frag_B : memref<64x64xf16, 3>
-  global_memref "public" @frag_B_padded : memref<64x72xf16, 3>
-  global_memref "public" @frag_A_padded : memref<128x72xf16, 3>
+  memref.global "public" @frag_A : memref<128x64xf16, 3>
+  memref.global "public" @frag_B : memref<64x64xf16, 3>
+  memref.global "public" @frag_B_padded : memref<64x72xf16, 3>
+  memref.global "public" @frag_A_padded : memref<128x72xf16, 3>
   func @main() {
     %c16 = constant 16 : index
     %cst = constant 0.000000e+00 : f32
@@ -13,9 +13,9 @@ module  {
     %c1 = constant 1 : index
     %c137438953472_i64 = constant 137438953472 : i64
     %c4096 = constant 4096 : index
-    %0 = alloc() : memref<4096x4096xf16>
-    %1 = alloc() : memref<4096x4096xf16>
-    %2 = alloc() : memref<4096x4096xf32>
+    %0 = memref.alloc() : memref<4096x4096xf16>
+    %1 = memref.alloc() : memref<4096x4096xf16>
+    %2 = memref.alloc() : memref<4096x4096xf32>
     scf.for %arg0 = %c0 to %c4096 step %c1 {
       scf.for %arg1 = %c0 to %c4096 step %c1 {
         %18 = remi_signed %arg0, %c16 : index
@@ -24,7 +24,7 @@ module  {
         %21 = remi_signed %20, %c16 : index
         %22 = index_cast %21 : index to i16
         %23 = sitofp %22 : i16 to f16
-        store %23, %0[%arg0, %arg1] : memref<4096x4096xf16>
+        memref.store %23, %0[%arg0, %arg1] : memref<4096x4096xf16>
       }
     }
     scf.for %arg0 = %c0 to %c4096 step %c1 {
@@ -35,12 +35,12 @@ module  {
         %21 = remi_signed %20, %c16 : index
         %22 = index_cast %21 : index to i16
         %23 = sitofp %22 : i16 to f16
-        store %23, %1[%arg0, %arg1] : memref<4096x4096xf16>
+        memref.store %23, %1[%arg0, %arg1] : memref<4096x4096xf16>
       }
     }
     scf.for %arg0 = %c0 to %c4096 step %c1 {
       scf.for %arg1 = %c0 to %c4096 step %c1 {
-        store %cst, %2[%arg0, %arg1] : memref<4096x4096xf32>
+        memref.store %cst, %2[%arg0, %arg1] : memref<4096x4096xf32>
       }
     }
     %3 = gpu.wait async
@@ -63,10 +63,10 @@ module  {
     %c128 = constant 128 : index
     %c64 = constant 64 : index
     scf.parallel (%arg0, %arg1) = (%c0_4, %c0_5) to (%c4096_6, %c4096_7) step (%c128, %c64) {
-      %18 = get_global_memref @frag_B_padded : memref<64x72xf16, 3>
+      %18 = memref.get_global @frag_B_padded : memref<64x72xf16, 3>
       %19 = memref_vector_cast %18 : memref<64x72xf16, 3> to memref<64x9xvector<8xf16>, 3>
       %20 = memref_vector_cast %18 : memref<64x72xf16, 3> to memref<64x9xvector<8xf16>, 3>
-      %21 = get_global_memref @frag_A_padded : memref<128x72xf16, 3>
+      %21 = memref.get_global @frag_A_padded : memref<128x72xf16, 3>
       %22 = memref_vector_cast %21 : memref<128x72xf16, 3> to memref<128x9xvector<8xf16>, 3>
       %23 = memref_vector_cast %21 : memref<128x72xf16, 3> to memref<128x9xvector<8xf16>, 3>
       %c0_8 = constant 0 : index
@@ -129,7 +129,7 @@ module  {
           %63 = divi_signed %62, %c8_42 : index
           %64 = subi %c-1, %63 : index
           %65 = select %60, %64, %63 : index
-          %66 = load %7[%57, %65] : memref<4096x512xvector<8xf16>>
+          %66 = memref.load %7[%57, %65] : memref<4096x512xvector<8xf16>>
           %c8_44 = constant 8 : index
           %c0_45 = constant 0 : index
           %c-1_46 = constant -1 : index
@@ -139,7 +139,7 @@ module  {
           %70 = divi_signed %69, %c8_44 : index
           %71 = subi %c-1_46, %70 : index
           %72 = select %67, %71, %70 : index
-          store %66, %20[%57, %72] : memref<64x9xvector<8xf16>, 3>
+          memref.store %66, %20[%57, %72] : memref<64x9xvector<8xf16>, 3>
           scf.yield
         } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
         %c0_26 = constant 0 : index
@@ -173,7 +173,7 @@ module  {
           %63 = divi_signed %62, %c8_42 : index
           %64 = subi %c-1, %63 : index
           %65 = select %60, %64, %63 : index
-          %66 = load %4[%59, %65] : memref<4096x512xvector<8xf16>>
+          %66 = memref.load %4[%59, %65] : memref<4096x512xvector<8xf16>>
           %c8_44 = constant 8 : index
           %c0_45 = constant 0 : index
           %c-1_46 = constant -1 : index
@@ -183,7 +183,7 @@ module  {
           %70 = divi_signed %69, %c8_44 : index
           %71 = subi %c-1_46, %70 : index
           %72 = select %67, %71, %70 : index
-          store %66, %22[%57, %72] : memref<128x9xvector<8xf16>, 3>
+          memref.store %66, %22[%57, %72] : memref<128x9xvector<8xf16>, 3>
           scf.yield
         } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
         gpu.barrier
@@ -225,7 +225,7 @@ module  {
             %78 = divi_signed %77, %c8_68 : index
             %79 = subi %c-1, %78 : index
             %80 = select %75, %79, %78 : index
-            %81 = load %6[%73, %80] : memref<4096x512xvector<8xf16>>
+            %81 = memref.load %6[%73, %80] : memref<4096x512xvector<8xf16>>
             %c8_70 = constant 8 : index
             %c0_71 = constant 0 : index
             %c-1_72 = constant -1 : index
@@ -235,7 +235,7 @@ module  {
             %85 = divi_signed %84, %c8_70 : index
             %86 = subi %c-1_72, %85 : index
             %87 = select %82, %86, %85 : index
-            store %81, %19[%70, %87] : memref<64x9xvector<8xf16>, 3>
+            memref.store %81, %19[%70, %87] : memref<64x9xvector<8xf16>, 3>
             scf.yield
           } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
           %c0_53 = constant 0 : index
@@ -272,7 +272,7 @@ module  {
             %79 = select %74, %78, %77 : index
             %c8_69 = constant 8 : index
             %80 = addi %79, %c8_69 : index
-            %81 = load %5[%72, %80] : memref<4096x512xvector<8xf16>>
+            %81 = memref.load %5[%72, %80] : memref<4096x512xvector<8xf16>>
             %c8_70 = constant 8 : index
             %c0_71 = constant 0 : index
             %c-1_72 = constant -1 : index
@@ -282,7 +282,7 @@ module  {
             %85 = divi_signed %84, %c8_70 : index
             %86 = subi %c-1_72, %85 : index
             %87 = select %82, %86, %85 : index
-            store %81, %23[%70, %87] : memref<128x9xvector<8xf16>, 3>
+            memref.store %81, %23[%70, %87] : memref<128x9xvector<8xf16>, 3>
             scf.yield
           } {mapping = [{bound = #map, map = #map, processor = 0 : i64}]}
           %c0_64 = constant 0 : index

@@ -1,8 +1,8 @@
 // RUN: mlir-opt %s --gpu-kernel-outlining --canonicalize
 
 module  {
-  global_memref @asmem : memref<64x64xf16, 3>
-  global_memref @bsmem : memref<64x64xf16, 3>
+  memref.global @asmem : memref<64x64xf16, 3>
+  memref.global @bsmem : memref<64x64xf16, 3>
   func @main() {
     %c1024 = constant 1024 : index
     %c-1 = constant -1 : index
@@ -13,14 +13,14 @@ module  {
     %c128 = constant 128 : index
     %c32 = constant 32 : index
     %c2 = constant 2 : index
-    %0 = alloc() : memref<1024x1024xf16>
-    %1 = alloc() : memref<1024x1024xf16>
-    %2 = alloc() : memref<1024x1024xf32>
-    %3 = memref_cast %0 : memref<1024x1024xf16> to memref<*xf16>
+    %0 = memref.alloc() : memref<1024x1024xf16>
+    %1 = memref.alloc() : memref<1024x1024xf16>
+    %2 = memref.alloc() : memref<1024x1024xf32>
+    %3 = memref.cast %0 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %3 : memref<*xf16>
-    %4 = memref_cast %1 : memref<1024x1024xf16> to memref<*xf16>
+    %4 = memref.cast %1 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %4 : memref<*xf16>
-    %5 = memref_cast %2 : memref<1024x1024xf32> to memref<*xf32>
+    %5 = memref.cast %2 : memref<1024x1024xf32> to memref<*xf32>
     gpu.host_register %5 : memref<*xf32>
     gpu.launch blocks(%arg0, %arg1, %arg2) in (%arg6 = %c16, %arg7 = %c16, %arg8 = %c1) threads(%arg3, %arg4, %arg5) in (%arg9 = %c128, %arg10 = %c1, %arg11 = %c1) {
       %6 = muli %arg5, %c128 : index
@@ -30,8 +30,8 @@ module  {
       %10 = divi_unsigned %9, %c32 : index
       %11 = muli %arg1, %c64 : index
       %12 = muli %arg0, %c64 : index
-      %13 = get_global_memref @asmem : memref<64x64xf16, 3>
-      %14 = get_global_memref @bsmem : memref<64x64xf16, 3>
+      %13 = memref.get_global @asmem : memref<64x64xf16, 3>
+      %14 = memref.get_global @bsmem : memref<64x64xf16, 3>
       %15 = remi_unsigned %10, %c2 : index
       %16 = divi_unsigned %10, %c2 : index
       %17 = muli %16, %c32 : index
@@ -65,12 +65,12 @@ module  {
               %48 = divi_signed %arg19, %39 : index
               %49 = addi %47, %12 : index
               %50 = addi %48, %arg14 : index
-              %51 = load %1[%50, %49] : memref<1024x1024xf16>
+              %51 = memref.load %1[%50, %49] : memref<1024x1024xf16>
               %52 = muli %arg14, %c-1 : index
               %53 = addi %52, %50 : index
               %54 = muli %12, %c-1 : index
               %55 = addi %54, %49 : index
-              store %51, %13[%53, %55] : memref<64x64xf16, 3>
+              memref.store %51, %13[%53, %55] : memref<64x64xf16, 3>
             }
             %41 = addi %11, %c64 : index
             %42 = addi %arg14, %c64 : index
@@ -82,12 +82,12 @@ module  {
               %48 = divi_signed %arg19, %44 : index
               %49 = addi %47, %arg14 : index
               %50 = addi %48, %11 : index
-              %51 = load %0[%50, %49] : memref<1024x1024xf16>
+              %51 = memref.load %0[%50, %49] : memref<1024x1024xf16>
               %52 = muli %11, %c-1 : index
               %53 = addi %52, %50 : index
               %54 = muli %arg14, %c-1 : index
               %55 = addi %54, %49 : index
-              store %51, %14[%53, %55] : memref<64x64xf16, 3>
+              memref.store %51, %14[%53, %55] : memref<64x64xf16, 3>
             }
             gpu.barrier
             %46:4 = scf.for %arg19 = %c0 to %c64 step %c16 iter_args(%arg20 = %arg15, %arg21 = %arg16, %arg22 = %arg17, %arg23 = %arg18) -> (!gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>, !gpu.mmafragment<8, f32>) {

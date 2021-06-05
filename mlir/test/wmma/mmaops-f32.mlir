@@ -4,22 +4,22 @@
 #map1 = affine_map<(d0, d1) -> (d0 + d1 + 16)>
 #map2 = affine_map<(d0) -> (d0 + 16)>
 module  {
-  global_memref @asmem : memref<64x64xf16, 3>
-  global_memref @bsmem : memref<64x64xf16, 3>
+  memref.global @asmem : memref<64x64xf16, 3>
+  memref.global @bsmem : memref<64x64xf16, 3>
   func @main() {
-    %0 = alloc() : memref<1024x1024xf16>
-    %1 = alloc() : memref<1024x1024xf16>
-    %2 = alloc() : memref<1024x1024xf32>
-    %3 = memref_cast %0 : memref<1024x1024xf16> to memref<*xf16>
+    %0 = memref.alloc() : memref<1024x1024xf16>
+    %1 = memref.alloc() : memref<1024x1024xf16>
+    %2 = memref.alloc() : memref<1024x1024xf32>
+    %3 = memref.cast %0 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %3 : memref<*xf16>
-    %4 = memref_cast %1 : memref<1024x1024xf16> to memref<*xf16>
+    %4 = memref.cast %1 : memref<1024x1024xf16> to memref<*xf16>
     gpu.host_register %4 : memref<*xf16>
-    %5 = memref_cast %2 : memref<1024x1024xf32> to memref<*xf32>
+    %5 = memref.cast %2 : memref<1024x1024xf32> to memref<*xf32>
     gpu.host_register %5 : memref<*xf32>
     affine.parallel (%arg0) = (0) to (1024) step (64) {
       affine.parallel (%arg1) = (0) to (1024) step (64) {
-        %6 = get_global_memref @asmem : memref<64x64xf16, 3>
-        %7 = get_global_memref @bsmem : memref<64x64xf16, 3>
+        %6 = memref.get_global @asmem : memref<64x64xf16, 3>
+        %7 = memref.get_global @bsmem : memref<64x64xf16, 3>
         affine.parallel (%arg2) = (0) to (64) step (32) {
           affine.parallel (%arg3) = (0) to (64) step (32) {
             %8 = affine.apply #map0(%arg0, %arg2)
