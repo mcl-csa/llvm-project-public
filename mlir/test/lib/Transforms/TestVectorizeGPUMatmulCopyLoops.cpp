@@ -102,8 +102,12 @@ void TestVectorizeGPUMatmulCopyLoops::runOnFunction() {
   // the ops yield somehing. Whenever this breaks we need to handle this.
   funcOp.walk([&](AffineForOp forOp) {
     if (auto isParallel = forOp->getAttrOfType<BoolAttr>("isParallel")) {
-      if (isParallel.getValue() == true)
-        affineParallelize(forOp);
+      if (isParallel.getValue() == true) {
+        LogicalResult res = affineParallelize(forOp);
+        assert(res.succeeded() &&
+               "Loop parallelization failed. Check the loop given to "
+               "parallelize\n");
+      }
     }
   });
 }
