@@ -485,6 +485,7 @@ static void findTileSizes(ParallelOp parallelOp) {
       }
     }
   });
+  assert(warpLoop && "warp loop not found");
   assert(warpLoop.getNumLoops() == 2 && "Not a 2-d warp loop");
   SmallVector<Value, 2> threadBlockLoopSteps(parallelOp.step());
   SmallVector<Value, 2> warpLoopSteps(warpLoop.step());
@@ -549,7 +550,7 @@ LoopsToGpuLowering::matchAndRewrite(ParallelOp parallelOp,
                                      worklist, rewriter)))
         return failure();
     } else if (op == launchOp.getOperation()) {
-      auto parent = rewriter.getInsertionPoint()->getParentOp();
+      auto *parent = rewriter.getInsertionPoint()->getParentOp();
       rewriter.setInsertionPointAfter(parent);
     } else if (auto nestedFor = dyn_cast<ForOp>(op)) {
       if (failed(convertForLoop(launchOp, nestedFor, cloningMap, worklist,
