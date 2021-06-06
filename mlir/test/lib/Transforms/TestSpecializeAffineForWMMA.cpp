@@ -171,36 +171,31 @@ static void findComputeLoops(AffineForOp rootForOp,
 ///		    Inter Thread-Block loops(i,j,k)
 ///		      Inter Warp loops(ii, jj, kk)
 ///			Intra Warp loops(iii, jjj, kkk)
-static void insepectTileStructure(SmallVector<AffineForOp> &computeLoops,
-                                  SmallVector<Value> &loopsIVs) {
+static void inspectTileStructure(ArrayRef<AffineForOp> computeLoops,
+                                 ArrayRef<Value> loopsIVs) {
   unsigned curMapStage = 0;
-  for (auto loop = computeLoops.begin() +
-                   TestSpecializeAffineForWMMA::kNumIntialLoops,
-            e = computeLoops.end();
-       loop < e; ++loop) {
-    if (!loop->hasConstantBounds()) {
-      // Insert lower/upper bound operands.
-      SmallVector<Value> ivOperands;
-      ivOperands.insert(ivOperands.end(), loop->getLowerBoundOperands().begin(),
-                        loop->getLowerBoundOperands().end());
-      ivOperands.insert(ivOperands.end(), loop->getUpperBoundOperands().begin(),
-                        loop->getUpperBoundOperands().end());
+  for (AffineForOp loop :
+       computeLoops.drop_front(TestSpecializeAffineForWMMA::kNumIntialLoops)) {
+    if (loop.hasConstantBounds())
+      continue;
+    // Insert lower/upper bound operands.
+    SmallVector<Value> ivOperands(loop.getLowerBoundOperands());
+    ivOperands.append(loop.getUpperBoundOperands().begin(),
+                      loop.getUpperBoundOperands().end());
 
-      // The loops must be dependent from the outermost to the innermost loops.
-      bool foundDependentLoopIV = false;
-      for (auto operand : ivOperands) {
-        if (operand == loopsIVs[curMapStage] ||
-            operand == loopsIVs[curMapStage +
-                                TestSpecializeAffineForWMMA::kNumIntialLoops])
-          foundDependentLoopIV = true;
-      }
-
-      assert(
-          foundDependentLoopIV &&
-          "Recipe for tensor core matmul failed, improperly tiled loop nest");
-      ++curMapStage;
-      curMapStage %= TestSpecializeAffineForWMMA::kNumIntialLoops;
+    // The loops must be dependent from the outermost to the innermost loops.
+    bool foundDependentLoopIV = false;
+    for (Value operand : ivOperands) {
+      if (operand == loopsIVs[curMapStage] ||
+          operand == loopsIVs[curMapStage +
+                              TestSpecializeAffineForWMMA::kNumIntialLoops])
+        foundDependentLoopIV = true;
     }
+
+    assert(foundDependentLoopIV &&
+           "Recipe for tensor core matmul failed, improperly tiled loop nest");
+    ++curMapStage;
+    curMapStage %= TestSpecializeAffineForWMMA::kNumIntialLoops;
   }
 }
 
@@ -208,20 +203,18 @@ static void insepectTileStructure(SmallVector<AffineForOp> &computeLoops,
 static bool canBeHoisted(Operation *op, AffineForOp forOp,
                          SmallVector<AffineMap> &affineMaps,
                          SmallVector<SmallVector<Value>> &mapOprs) {
-  auto isIndependentOfLoopIV = [&](MutableArrayRef<OpOperand> operands) {
-    for (auto &operand : operands) {
+  auto isIndependentOfLoopIV = [&](ValueRange operands) {
+    for (Value operand : operands) {
       // TODO: Handle cases where the operands to the op may not be results of
       // AffineApplyOp.
-      if (auto defOp = dyn_cast<AffineApplyOp>(operand.get().getDefiningOp())) {
+      if (auto defOp = operand.getDefiningOp<AffineApplyOp>()) {
         AffineMap inxMap = defOp.getAffineMap();
         SmallVector<Value> mapOpr(defOp.getMapOperands());
         fullyComposeAffineMapAndOperands(&inxMap, &mapOpr);
         canonicalizeMapAndOperands(&inxMap, &mapOpr);
         // After compostion check whether all the operands are independant of
         // the surrounding AffineForOp.
-        if (llvm::all_of(mapOpr, [&](Value mapOpr) {
-              return mapOpr != forOp.getInductionVar();
-            })) {
+        if (!llvm::is_contained(mapOpr, forOp.getInductionVar())) {
           affineMaps.push_back(inxMap);
           mapOprs.push_back(mapOpr);
         } else
@@ -234,7 +227,7 @@ static bool canBeHoisted(Operation *op, AffineForOp forOp,
   if (auto mmaOp = dyn_cast<gpu::SubgroupMmaLoadMatrixOp>(op)) {
     // Check if the indices of the mmaLoadOp have any dependency to an affine
     // apply op.
-    return isIndependentOfLoopIV(mmaOp->getOpOperands());
+    return isIndependentOfLoopIV(mmaOp->getOperands());
   }
 
   return false;
@@ -503,10 +496,10 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
                                      mlir::Attribute(), mlir::UnitAttr());
 
           b.setInsertionPointAfter(getGlobalMemrefOp);
-          Value PaddedAFrag = b.create<memref::GetGlobalOp>(
+          Value paddedAFrag = b.create<memref::GetGlobalOp>(
               getGlobalMemrefOp.getLoc(), paddedAFragType, newName);
 
-          getGlobalMemrefOp.replaceAllUsesWith(PaddedAFrag);
+          getGlobalMemrefOp.replaceAllUsesWith(paddedAFrag);
           getGlobalMemrefOp.erase();
         }
       }
@@ -543,7 +536,7 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   }
 
   // Check the tiling order of loops.
-  insepectTileStructure(computeLoops, loopsIVs);
+  inspectTileStructure(computeLoops, loopsIVs);
 
   // Insert GPU MMA ops in the innermost loop nest. This involves changing the
   // loop steps of the surrounding loops. To the size of WMMA operation and
