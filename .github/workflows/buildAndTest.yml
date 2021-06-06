@@ -2,9 +2,9 @@ name: Build and Test
 
 on:
   push:
-    branches: [gpu-codegen]
+    branches: [gpu-codegen-upstream]
   pull_request:
-    branches: [gpu-codegen]
+    branches: [gpu-codegen-upstream]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
