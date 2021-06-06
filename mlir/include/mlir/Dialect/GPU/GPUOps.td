@@ -797,6 +797,71 @@ def GPU_WaitOp : GPU_Op<"wait", [GPU_AsyncOpInterface]> {
   }];
 }
 
+def GPU_EventCreateOp : GPU_Op<"event_create">{
+
+  let summary = "Event create op.";
+  let description = [{Event create op.}];
+
+  let results = (outs GPU_Event:$event);
+
+  let assemblyFormat = [{
+    attr-dict `:` type($event)
+  }];
+
+  //let verifier = [{ return ::verify(*this); }];
+}
+
+def GPU_EventDestroyOp : GPU_Op<"event_destroy">{
+
+  let summary = "Event destory op.";
+  let description = [{Event destroy op.}];
+
+  let arguments = (outs GPU_Event:$event);
+
+  let assemblyFormat = [{
+    $event attr-dict
+  }];
+}
+
+def GPU_EventSynchronizeOp : GPU_Op<"event_synchronize">{
+
+  let summary = "Event synchronize op.";
+  let description = [{Event synchronize op.}];
+
+  let arguments = (outs GPU_Event:$event);
+
+  let assemblyFormat = [{
+    $event attr-dict
+  }];
+}
+
+def GPU_EventRecordOp: GPU_Op<"event_record", [GPU_AsyncOpInterface]>{
+
+  let summary = "Event record op.";
+  let description = [{Event record op.}];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                        GPU_Event:$event);
+  let results = (outs Optional<GPU_AsyncToken>:$asyncToken);
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)`,` $event attr-dict
+  }];
+}
+
+def GPU_EventElapsedTimeOp: GPU_Op<"event_elapsed_time">{
+
+  let summary = "Event elapsed time op.";
+  let description = [{Event elapsed time op.}];
+  let arguments = (ins GPU_Event:$start,
+                      GPU_Event:$end);
+  let results = (outs F32:$time);
+
+  let assemblyFormat = [{
+    $start`,` $end attr-dict `:` type($start)`,` type($end) `->` type($time)
+  }];
+}
+
 def GPU_AllocOp : GPU_Op<"alloc", [
     GPU_AsyncOpInterface,
     AttrSizedOperandSegments

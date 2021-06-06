@@ -99,6 +99,7 @@ bool GPUDialect::isKernel(Operation *op) {
 
 void GPUDialect::initialize() {
   addTypes<AsyncTokenType>();
+  addTypes<EventType>();
   addTypes<MMAMatrixType>();
   addOperations<
 #define GET_OP_LIST
@@ -116,6 +117,9 @@ Type GPUDialect::parseType(DialectAsmParser &parser) const {
   // Handle 'async token' types.
   if (keyword == "async.token")
     return AsyncTokenType::get(context);
+
+  if (keyword == "event")
+    return EventType::get(context);
 
   if (keyword == "mma_matrix") {
     llvm::SMLoc beginLoc = parser.getNameLoc();
@@ -156,6 +160,7 @@ Type GPUDialect::parseType(DialectAsmParser &parser) const {
 void GPUDialect::printType(Type type, DialectAsmPrinter &os) const {
   TypeSwitch<Type>(type)
       .Case<AsyncTokenType>([&](Type) { os << "async.token"; })
+      .Case<EventType>([&](Type) { os << "event"; })
       .Case<MMAMatrixType>([&](MMAMatrixType fragTy) {
         os << "mma_matrix<";
         auto shape = fragTy.getShape();

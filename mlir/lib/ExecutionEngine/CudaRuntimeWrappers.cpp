@@ -115,7 +115,7 @@ extern "C" MLIR_CUDA_WRAPPERS_EXPORT void mgpuStreamWaitEvent(CUstream stream,
 extern "C" MLIR_CUDA_WRAPPERS_EXPORT CUevent mgpuEventCreate() {
   ScopedContext scopedContext;
   CUevent event = nullptr;
-  CUDA_REPORT_IF_ERROR(cuEventCreate(&event, CU_EVENT_DISABLE_TIMING));
+  CUDA_REPORT_IF_ERROR(cuEventCreate(&event, CU_EVENT_DEFAULT));
   return event;
 }
 
@@ -125,6 +125,13 @@ extern "C" MLIR_CUDA_WRAPPERS_EXPORT void mgpuEventDestroy(CUevent event) {
 
 extern MLIR_CUDA_WRAPPERS_EXPORT "C" void mgpuEventSynchronize(CUevent event) {
   CUDA_REPORT_IF_ERROR(cuEventSynchronize(event));
+}
+
+extern "C" MLIR_CUDA_WRAPPERS_EXPORT float mgpuEventElapsedTime(CUevent start,
+                                                                CUevent end) {
+  float ms;
+  CUDA_REPORT_IF_ERROR(cuEventElapsedTime(&ms, start, end));
+  return ms;
 }
 
 extern MLIR_CUDA_WRAPPERS_EXPORT "C" void mgpuEventRecord(CUevent event,

@@ -44,6 +44,14 @@ public:
   using Base::Base;
 };
 
+/// EventType represents events in GPU streams. This is a simple type which
+/// is meant to be used with some special event creation/deletion/timing ops
+/// only.
+class EventType : public Type::TypeBase<EventType, Type, TypeStorage> {
+public:
+  using Base::Base;
+};
+
 /// MMAMatrixType storage and uniquing. Array is uniqued based on its shape
 /// and type.
 struct MMAMatrixStorageType : public TypeStorage {

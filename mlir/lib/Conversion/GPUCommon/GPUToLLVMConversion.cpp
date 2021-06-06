@@ -132,6 +132,10 @@ protected:
       "mgpuEventCreate", llvmPointerType /* void *event */, {}};
   FunctionCallBuilder eventDestroyCallBuilder = {
       "mgpuEventDestroy", llvmVoidType, {llvmPointerType /* void *event */}};
+  FunctionCallBuilder eventElapsedTimeBuilder = {
+      "mgpuEventElapsedTime",
+      Float32Type::get(context),
+      {llvmPointerType /* void *event */, llvmPointerType /* void *event */}};
   FunctionCallBuilder eventSynchronizeCallBuilder = {
       "mgpuEventSynchronize",
       llvmVoidType,
@@ -245,6 +249,70 @@ private:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
+class ConvertEventCreateOpToGpuRuntimeCallPattern
+    : public ConvertOpToGpuRuntimeCallPattern<gpu::EventCreateOp> {
+public:
+  ConvertEventCreateOpToGpuRuntimeCallPattern(LLVMTypeConverter &typeConverter)
+      : ConvertOpToGpuRuntimeCallPattern<gpu::EventCreateOp>(typeConverter) {}
+
+private:
+  LogicalResult
+  matchAndRewrite(gpu::EventCreateOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+class ConvertEventDestroyOpToGpuRuntimeCallPattern
+    : public ConvertOpToGpuRuntimeCallPattern<gpu::EventDestroyOp> {
+public:
+  ConvertEventDestroyOpToGpuRuntimeCallPattern(LLVMTypeConverter &typeConverter)
+      : ConvertOpToGpuRuntimeCallPattern<gpu::EventDestroyOp>(typeConverter) {}
+
+private:
+  LogicalResult
+  matchAndRewrite(gpu::EventDestroyOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+class ConvertEventRecordOpToGpuRuntimeCallPattern
+    : public ConvertOpToGpuRuntimeCallPattern<gpu::EventRecordOp> {
+public:
+  ConvertEventRecordOpToGpuRuntimeCallPattern(LLVMTypeConverter &typeConverter)
+      : ConvertOpToGpuRuntimeCallPattern<gpu::EventRecordOp>(typeConverter) {}
+
+private:
+  LogicalResult
+  matchAndRewrite(gpu::EventRecordOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+class ConvertEventSynchronizeOpToGpuRuntimeCallPattern
+    : public ConvertOpToGpuRuntimeCallPattern<gpu::EventSynchronizeOp> {
+public:
+  ConvertEventSynchronizeOpToGpuRuntimeCallPattern(
+      LLVMTypeConverter &typeConverter)
+      : ConvertOpToGpuRuntimeCallPattern<gpu::EventSynchronizeOp>(
+            typeConverter) {}
+
+private:
+  LogicalResult
+  matchAndRewrite(gpu::EventSynchronizeOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+class ConvertEventElapsedTimeOpToGpuRuntimeCallPattern
+    : public ConvertOpToGpuRuntimeCallPattern<gpu::EventElapsedTimeOp> {
+public:
+  ConvertEventElapsedTimeOpToGpuRuntimeCallPattern(
+      LLVMTypeConverter &typeConverter)
+      : ConvertOpToGpuRuntimeCallPattern<gpu::EventElapsedTimeOp>(
+            typeConverter) {}
+
+private:
+  LogicalResult
+  matchAndRewrite(gpu::EventElapsedTimeOp, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
 /// A rewrite patter to convert gpu.launch_func operations into a sequence of
 /// GPU runtime calls. Currently it supports CUDA and ROCm (HIP).
 ///
@@ -320,12 +388,20 @@ void GpuToLLVMConversionPass::runOnOperation() {
       [context = &converter.getContext()](gpu::AsyncTokenType type) -> Type {
         return LLVM::LLVMPointerType::get(IntegerType::get(context, 8));
       });
+  converter.addConversion([](gpu::EventType type) -> Type {
+    return LLVM::LLVMPointerType::get(IntegerType::get(type.getContext(), 8));
+  });
   patterns.add<ConvertAllocOpToGpuRuntimeCallPattern,
                ConvertDeallocOpToGpuRuntimeCallPattern,
                ConvertHostRegisterOpToGpuRuntimeCallPattern,
                ConvertMemcpyOpToGpuRuntimeCallPattern,
                ConvertWaitAsyncOpToGpuRuntimeCallPattern,
                ConvertWaitOpToGpuRuntimeCallPattern,
+               ConvertEventCreateOpToGpuRuntimeCallPattern,
+               ConvertEventDestroyOpToGpuRuntimeCallPattern,
+               ConvertEventRecordOpToGpuRuntimeCallPattern,
+               ConvertEventSynchronizeOpToGpuRuntimeCallPattern,
+               ConvertEventElapsedTimeOpToGpuRuntimeCallPattern,
                ConvertAsyncYieldToGpuRuntimeCallPattern>(converter);
   patterns.add<ConvertLaunchFuncOpToGpuRuntimeCallPattern>(converter,
                                                            gpuBinaryAnnotation);
@@ -574,9 +650,69 @@ LogicalResult ConvertWaitAsyncOpToGpuRuntimeCallPattern::matchAndRewrite(
   return success();
 }
 
-// Creates a struct containing all kernel parameters on the stack and returns
-// an array of type-erased pointers to the fields of the struct. The array can
-// then be passed to the CUDA / ROCm (HIP) kernel launch calls.
+LogicalResult ConvertEventCreateOpToGpuRuntimeCallPattern::matchAndRewrite(
+    gpu::EventCreateOp eventCreateOp, ArrayRef<Value> operands,
+    ConversionPatternRewriter &rewriter) const {
+  auto event =
+      eventCreateCallBuilder.create(eventCreateOp.getLoc(), rewriter, {})
+          .getResult(0);
+  rewriter.replaceOp(eventCreateOp, event);
+
+  return success();
+}
+
+LogicalResult ConvertEventDestroyOpToGpuRuntimeCallPattern::matchAndRewrite(
+    gpu::EventDestroyOp eventDestroyOp, ArrayRef<Value> operands,
+    ConversionPatternRewriter &rewriter) const {
+  gpu::EventDestroyOpAdaptor eventDestroyAdaptor(operands);
+  eventDestroyCallBuilder.create(eventDestroyOp.getLoc(), rewriter,
+                                 {eventDestroyAdaptor.event()});
+  rewriter.eraseOp(eventDestroyOp);
+
+  return success();
+}
+
+LogicalResult ConvertEventRecordOpToGpuRuntimeCallPattern::matchAndRewrite(
+    gpu::EventRecordOp eventRecordOp, ArrayRef<Value> operands,
+    ConversionPatternRewriter &rewriter) const {
+  gpu::EventRecordOpAdaptor eventRecordAdaptor(operands);
+  eventRecordCallBuilder.create(
+      eventRecordOp.getLoc(), rewriter,
+      {eventRecordAdaptor.event(),
+       eventRecordAdaptor.asyncDependencies().front()});
+
+  rewriter.eraseOp(eventRecordOp);
+  return success();
+}
+
+LogicalResult ConvertEventSynchronizeOpToGpuRuntimeCallPattern::matchAndRewrite(
+    gpu::EventSynchronizeOp eventSynchornizeOp, ArrayRef<Value> operands,
+    ConversionPatternRewriter &rewriter) const {
+  gpu::EventSynchronizeOpAdaptor eventSynchronizeAdaptor(operands);
+  eventSynchronizeCallBuilder.create(eventSynchornizeOp.getLoc(), rewriter,
+                                     {eventSynchronizeAdaptor.event()});
+
+  rewriter.eraseOp(eventSynchornizeOp);
+  return success();
+}
+
+LogicalResult ConvertEventElapsedTimeOpToGpuRuntimeCallPattern::matchAndRewrite(
+    gpu::EventElapsedTimeOp EventElapsedTimeOp, ArrayRef<Value> operands,
+    ConversionPatternRewriter &rewriter) const {
+  gpu::EventElapsedTimeOpAdaptor elapsedTimeAdaptor(operands);
+  auto time =
+      eventElapsedTimeBuilder
+          .create(EventElapsedTimeOp.getLoc(), rewriter,
+                  {elapsedTimeAdaptor.start(), elapsedTimeAdaptor.end()})
+          .getResult(0);
+  rewriter.replaceOp(EventElapsedTimeOp, time);
+
+  return success();
+}
+
+// Creates a struct containing all kernel parameters on the stack and
+// returns an array of type-erased pointers to the fields of the struct. The
+// array can then be passed to the CUDA / ROCm (HIP) kernel launch calls.
 // The generated code is essentially as follows:
 //
 // %struct = alloca(sizeof(struct { Parameters... }))

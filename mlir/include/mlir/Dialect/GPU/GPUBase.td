@@ -57,7 +57,12 @@ def GPU_AsyncToken : DialectType<
   GPU_Dialect, CPred<"$_self.isa<::mlir::gpu::AsyncTokenType>()">, "async token type">,
              BuildableType<"mlir::gpu::AsyncTokenType::get($_builder.getContext())">;
 
-// Predicat to check if type is gpu::MMAMatrixType.
+/// Type for events in GPU streams. Events are checkpoints which are basically inserted
+/// into a stream and are used to record execution time of GPU kernels.
+def GPU_Event : DialectType<GPU_Dialect, CPred<"$_self.isa<::mlir::gpu::EventType>()">,
+    "event type">, BuildableType<"::mlir::gpu::EventType::get($_builder.getContext())">;
+
+// Predicate to check if type is gpu::MMAMatrixType.
 def IsMMAMatrixTypePred : CPred<"$_self.isa<::mlir::gpu::MMAMatrixType>()">;
 
 def GPU_MMAMatrix : DialectType<
