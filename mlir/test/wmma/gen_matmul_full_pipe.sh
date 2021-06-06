@@ -60,7 +60,6 @@ echo "func @main() {
   gpu.wait [%t0]
 
   // Main kernel
-  %t_start = call @rtclock() : () -> (f64)
   affine.for %i = 0 to %M {
     affine.for %j = 0 to %N {
       affine.for %l = 0 to %K {
@@ -74,26 +73,11 @@ echo "func @main() {
       }
     }
   }
-  %t_end = call @rtclock() : () -> (f64)
   
   %t1 = gpu.wait async 
   // Copy result matrix back to host for printing.
   %t8 = gpu.memcpy async [%t1] %C, %gpu_C : memref<$1x$3xf32>, memref<$1x$3xf32>
   gpu.wait[%t8]
-  
-  // Logic for printing perf.
-  %t = subf %t_end, %t_start : f64
-  %f1 = muli %M, %N : index
-  %f2 = muli %f1, %K : index
-  // 2*M*N*K.
-  %reps = constant 1 : index
-  %c2 = constant 2 : index
-  %f3 = muli %c2, %f2 : index
-  %num_flops = muli %reps, %f3 : index
-  %num_flops_i = index_cast %num_flops : index to i64
-  %num_flops_f = sitofp %num_flops_i : i64 to f64
-  %flops = divf %num_flops_f, %t : f64
-  call @print_flops(%flops) : (f64) -> ()
   
   %22 = memref.cast %C : memref<$1x$3xf32> to memref<*xf32>"
   
@@ -103,6 +87,25 @@ echo "func @main() {
   fi
 
   echo "return
+}
+
+gpu.module @initC_kernel {
+  gpu.func @initC_kernel(%arg0: memref<$1x$3xf32>) kernel {
+    %c1 = constant 1 : index
+    %c0 = constant 0 : index
+    %dim0 = memref.dim %arg0, %c0 : memref<$1x$3xf32>
+    %dim1 = memref.dim %arg0, %c1 : memref<$1x$3xf32>
+    %cst = constant 0.000000e+00 : f32
+    %mul = muli %dim0, %dim1 : index
+
+    scf.for %arg1 = %c0 to %dim1 step %c1{
+      scf.for %arg2 = %c0 to %dim0 step %c1{
+        memref.store %cst, %arg0[%arg1,%arg2] : memref<$1x$3xf32> 
+      }   
+    }
+
+    gpu.return
+  }
 }
 
 func private @print_memref_f32(memref<*xf32>)

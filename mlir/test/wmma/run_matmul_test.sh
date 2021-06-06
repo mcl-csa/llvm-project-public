@@ -19,6 +19,8 @@ reg_per_thread=${reg_per_thread:-255}
 jit_opt_level=${jit_opt_level:-4}
 print_output=${print_output:-0}
 verify=${verify:-0}
+num_iters=${num_iters:-10}
+accum=${accum:-f32}
 
 # Get the passed parameter values if any.
 while [ $# -gt 0 ]; do
@@ -36,6 +38,9 @@ then
   print_output=1
 fi
 
+# Calculate flops.
+((flops = $problem_size_m * $problem_size_n * $problem_size_k * 2))
+
 MLIR_OPT="../../../build/bin/mlir-opt"
 MLIR_CPU_RUNNER="../../../build/bin/mlir-cpu-runner"
 MLIR_RUNTIME_LIB_DIR="../../../build/lib"
@@ -43,7 +48,13 @@ MLIR_RUNTIME_LIBS="--shared-libs=$MLIR_RUNTIME_LIB_DIR/libmlir_runner_utils.so -
 
 # Run the optimized version with the full pipeline.
 echo "Generating and running matmul (optimized)"
-./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output > matmul_opt_base.mlir
+
+if [[ "$accum" == "f32" ]]
+then
+  ./gen_matmul_full_pipe.sh $problem_size_m $problem_size_k $problem_size_n $print_output > matmul_opt_base.mlir
+else
+  ./gen_matmul_full_pipe_f16.sh $problem_size_m $problem_size_k $problem_size_n $print_output > matmul_opt_base.mlir
+fi
 
 $MLIR_OPT matmul_opt_base.mlir \
   --canonicalize \
@@ -52,7 +63,7 @@ $MLIR_OPT matmul_opt_base.mlir \
   -test-gpu-matmul-fast-buffer-placement="matrices=A,B global-allocation=true" \
   --canonicalize \
   --test-mark-parallel-loops > tiled.mlir
-  $MLIR_OPT tiled.mlir --test-specialize-affine-matmul-for-wmma="accum=f32 padding-a=$padding_a padding-b=$padding_b" \
+  $MLIR_OPT tiled.mlir --test-specialize-affine-matmul-for-wmma="accum=$accum padding-a=$padding_a padding-b=$padding_b" \
   --canonicalize --cse > specialized.mlir
   $MLIR_OPT specialized.mlir --test-split-compute-loop \
   --canonicalize --test-gpu-matmul-barrier-insertion > pipelined.mlir
@@ -72,7 +83,39 @@ $MLIR_OPT matmul_opt_base.mlir \
   --cse \
   --convert-scf-to-std > matmul_opt_final.mlir
 
-$MLIR_OPT matmul_opt_final.mlir -pass-pipeline='gpu.module(strip-debuginfo,convert-gpu-to-nvvm{index-bitwidth=32},gpu-to-cubin{chip=sm_75 max-reg-per-thread='$reg_per_thread' cu-jit-opt-level='$jit_opt_level'})' -gpu-to-llvm | $MLIR_CPU_RUNNER -O3 $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out
+$MLIR_OPT matmul_opt_final.mlir -pass-pipeline='gpu.module(strip-debuginfo,convert-gpu-to-nvvm{index-bitwidth=32},gpu-to-cubin{chip=sm_75 max-reg-per-thread='$reg_per_thread' cu-jit-opt-level='$jit_opt_level'})' -gpu-to-llvm | nvprof --csv $MLIR_CPU_RUNNER -O3 $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out 2> nvprof.txt
+
+# Get average execution time of `main_kernel`.
+interval=$(cat nvprof.txt | (awk '/main_kernel/') | (awk -F',' '{print $5}'))
+
+# Check if perf is reported by `nvprof`.
+if [ -z "$interval" ]
+then
+    echo -e "\e[31merror:\e[0m" "Either codeGen failed or execTime was not given by nvprof."
+    exit
+fi
+
+# Check if time is reported in millisecond, microsecond or second. If in micro or milli,
+# change to second.
+if grep -q ms,ms,ms nvprof.txt; then
+  interval=$(echo "( $interval / 1000)" | bc -l)
+else
+  if grep -q us,us,us nvprof.txt; then
+    interval=$(echo "( $interval / 1000000)" | bc -l)
+  else
+    if grep -q s,s,s nvprof.txt; then
+      interval=$(echo "( $interval )" | bc -l)
+    else
+      echo -e "\e[31merror:\e[0m" "Unsupported time format given by nvprof."
+      exit
+    fi
+  fi
+fi
+ 
+rm nvprof.txt
+
+# Calculate performance.
+>&2 printf '%.6f TFLOPs\n' $(echo "($flops / $interval) / 1000000000000" | bc -l)
 
 # Delete first line in the output which is irrelevant for output verification.
 sed '1d' full_pipe.out > tmpfile; mv tmpfile full_pipe.out
@@ -82,7 +125,7 @@ if [[ $verify -eq 1 ]]
 then
   echo "Generating and running matmul naive (unoptimized)"
   ./gen_matmul_naive.sh $problem_size_m $problem_size_k $problem_size_n > matmul_naive.mlir
-  $MLIR_OPT matmul_naive.mlir --convert-scf-to-std | $MLIR_CUDA_RUNNER -O3 --max-reg-per-thread=255 --sm=sm_75 --index-bitwidth=32 -gpu-to-cubin="gpu-binary-annotation=nvvm.cubin" -gpu-to-llvm="gpu-binary-annotation=nvvm.cubin" $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.out
+  $MLIR_OPT matmul_naive.mlir --convert-scf-to-std | $MLIR_OPT -pass-pipeline='gpu.module(strip-debuginfo,convert-gpu-to-nvvm{index-bitwidth=32},gpu-to-cubin{chip=sm_75 max-reg-per-thread=255 cu-jit-opt-level=4})' -gpu-to-llvm | $MLIR_CPU_RUNNER -O3 $MLIR_RUNTIME_LIBS --entry-point-result=void > naive.out
 
   echo -ne "Verifying...   "
   # Delete first line in the output which is irrelevant for output verification.
