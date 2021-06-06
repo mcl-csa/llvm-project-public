@@ -192,9 +192,7 @@ static void mapParallelOp(ParallelOp parallelOp,
   // two mapping attributes in order to map the i loop to y-dimension and
   // j loop to the x-dimension because it is more intuitive.
   if (parallelOp.getNumLoops() > 1) {
-    ParallelLoopDimMapping attr = attrs[0];
-    attrs[0] = attrs[1];
-    attrs[1] = attr;
+    std::swap(attrs[0], attrs[1]);
   }
   (void)setMappingAttribute(parallelOp, attrs);
   ++mappingLevel;
