@@ -23,6 +23,7 @@
 #include "mlir/Dialect/Vector/VectorOps.h"
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/Transforms/LoopUtils.h"
+#include "llvm/Support/Debug.h"
 
 using namespace mlir;
 
@@ -132,7 +133,7 @@ struct TestSpecializeAffineForWMMA
 };
 } // end anonymous namespace
 
-/// Find out the Tile space loops. Three outermost loops are the tile space
+/// Find tile space loops. The three outermost loops are the tile space
 /// loops. Three loops are the minimum number of loops that are to be present
 /// in matrix multiplication. Since copy loops may also be present in the code,
 /// The input may not be perfectly nested. Assuming that the copy loops are
@@ -514,12 +515,14 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
 
   // Get the root for op first.
   AffineForOp rootForOp;
-  funcOp.walk([&](AffineForOp forOp) {
-    if (!forOp->getParentOfType<AffineForOp>()) {
-      rootForOp = forOp;
-      WalkResult::interrupt();
-    }
+  funcOp.walk<WalkOrder::PreOrder>([&](AffineForOp forOp) {
+    rootForOp = forOp;
+    return WalkResult::interrupt();
   });
+  if (!rootForOp) {
+    LLVM_DEBUG(llvm::dbgs() << "No root for op to work with\n");
+    return;
+  }
 
   // Find All the compute loops in the rootForOp.
   SmallVector<AffineForOp> computeLoops;
