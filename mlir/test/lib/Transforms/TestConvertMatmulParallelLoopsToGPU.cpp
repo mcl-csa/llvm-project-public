@@ -146,13 +146,14 @@ static bool insertLaunchParams(ParallelOp parallelOp, ArrayRef<int64_t> tbDims,
   // Create Ops for dimensions of grid. The grid dimensions will be
   // (loopUB + loopStep - 1) / loopStep.
   Value constantOne = rewriter.create<ConstantIndexOp>(topLoc, 1);
-  for (auto loop : llvm::zip(parallelOp.upperBound(), parallelOp.step())) {
+  for (auto loop :
+       llvm::reverse(llvm::zip(parallelOp.upperBound(), parallelOp.step()))) {
     Value upperBound, step;
     std::tie(upperBound, step) = loop;
     Value resultA = rewriter.create<AddIOp>(topLoc, upperBound, step);
     Value resultB = rewriter.create<SubIOp>(topLoc, resultA, constantOne);
-    gridDimValues.insert(gridDimValues.begin(), rewriter.create<UnsignedDivIOp>(
-                                                    topLoc, resultB, step));
+    gridDimValues.push_back(
+        rewriter.create<UnsignedDivIOp>(topLoc, resultB, step));
   }
   return true;
 }
