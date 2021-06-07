@@ -83,39 +83,24 @@ $MLIR_OPT matmul_opt_base.mlir \
   --cse \
   --convert-scf-to-std > matmul_opt_final.mlir
 
-$MLIR_OPT matmul_opt_final.mlir -pass-pipeline='gpu.module(strip-debuginfo,convert-gpu-to-nvvm{index-bitwidth=32},gpu-to-cubin{chip=sm_75 max-reg-per-thread='$reg_per_thread' cu-jit-opt-level='$jit_opt_level'})' -gpu-to-llvm | nvprof --csv $MLIR_CPU_RUNNER -O3 $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out 2> nvprof.txt
+$MLIR_OPT matmul_opt_final.mlir -pass-pipeline='gpu.module(strip-debuginfo,convert-gpu-to-nvvm{index-bitwidth=32},gpu-to-cubin{chip=sm_75 max-reg-per-thread='$reg_per_thread' cu-jit-opt-level='$jit_opt_level'})' -gpu-to-llvm | nsys profile --force-overwrite true -o gpu_ $MLIR_CPU_RUNNER -O3 $MLIR_RUNTIME_LIBS --entry-point-result=void > full_pipe.out 2> dump_.txt
 
 # Get average execution time of `main_kernel`.
-interval=$(cat nvprof.txt | (awk '/main_kernel/') | (awk -F',' '{print $5}'))
+interval=$(nsys stats -q --force-overwrite true --format csv --report gpukernsum gpu_.qdrep | (awk '/main_kernel/') | (awk -F',' '{print $4}'))
 
-# Check if perf is reported by `nvprof`.
+rm -f gpu_.dqrep
+rm -f gpu_.sqlite
+rm -f dump_.txt
+
+# Check if perf is reported by `nsys`.
 if [ -z "$interval" ]
 then
-    echo -e "\e[31merror:\e[0m" "Either codeGen failed or execTime was not given by nvprof."
+    echo -e "\e[31merror:\e[0m" "Either codeGen failed or execTime was not given by nsys."
     exit
 fi
 
-# Check if time is reported in millisecond, microsecond or second. If in micro or milli,
-# change to second.
-if grep -q ms,ms,ms nvprof.txt; then
-  interval=$(echo "( $interval / 1000)" | bc -l)
-else
-  if grep -q us,us,us nvprof.txt; then
-    interval=$(echo "( $interval / 1000000)" | bc -l)
-  else
-    if grep -q s,s,s nvprof.txt; then
-      interval=$(echo "( $interval )" | bc -l)
-    else
-      echo -e "\e[31merror:\e[0m" "Unsupported time format given by nvprof."
-      exit
-    fi
-  fi
-fi
- 
-rm nvprof.txt
-
 # Calculate performance.
->&2 printf '%.6f TFLOPs\n' $(echo "($flops / $interval) / 1000000000000" | bc -l)
+>&2 printf '%.6f TFLOPs\n' $(echo "(($flops / $interval) * 1000000000) / 1000000000000" | bc -l)
 
 # Delete first line in the output which is irrelevant for output verification.
 sed '1d' full_pipe.out > tmpfile; mv tmpfile full_pipe.out
