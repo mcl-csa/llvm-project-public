@@ -55,8 +55,7 @@ bool useGlobalAllocation;
 
 /// Creates fast buffers (in memory space == 3) and places the specified
 /// matrices into them.
-static void createAndPlaceFastBuffers(AffineForOp rootForOp,
-                                      OpBuilder opBuilder) {
+static void createAndPlaceFastBuffers(AffineForOp rootForOp) {
   SmallVector<AffineForOp, 6> loopNest;
   getPerfectlyNestedLoops(loopNest, rootForOp);
 
@@ -120,11 +119,12 @@ static void createAndPlaceFastBuffers(AffineForOp rootForOp,
   // Attaches attributes with the loop nests copying input matrices A and B
   // (if present), and the loop nest which performs computation. These
   // attribtes are used by the pipelining pass.
+  MLIRContext *context = rootForOp.getContext();
   for (Operation *copyNest : copyNests)
-    copyNest->setAttr("isCopyLoopNest", opBuilder.getBoolAttr(true));
+    copyNest->setAttr("isCopyLoopNest", BoolAttr::get(context, true));
 
   // Mark the compute loop nest.
-  loopNest[2]->setAttr("isComputeLoopNest", opBuilder.getBoolAttr(true));
+  loopNest[2]->setAttr("isComputeLoopNest", BoolAttr::get(context, true));
 }
 
 static void runOnBlock(Block &block) {
@@ -133,7 +133,7 @@ static void runOnBlock(Block &block) {
     if (AffineForOp forOp = dyn_cast<AffineForOp>(op)) {
       if (!forOp->getParentOfType<AffineForOp>()) {
         OpBuilder opBuilder(forOp);
-        createAndPlaceFastBuffers(forOp, opBuilder);
+        createAndPlaceFastBuffers(forOp);
       }
     }
   }
