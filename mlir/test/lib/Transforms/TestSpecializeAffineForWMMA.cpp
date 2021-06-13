@@ -130,6 +130,12 @@ struct TestSpecializeAffineForWMMA
           "Padding in number of elements for B matrix. Minimum padding factor "
           "is 8 f16 elements, and must be a multiple of 8."),
       llvm::cl::init(0)};
+
+  /// Debug option to disable unrolling and unroll-and-jam.
+  Option<unsigned> clDisableUnroll{
+      *this, "disable-unroll",
+      llvm::cl::desc("Disable unroll and unroll-and-jam"),
+      llvm::cl::init(false)};
 };
 } // end anonymous namespace
 
@@ -701,7 +707,8 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   std::swap(computeLoops[ThreadI], computeLoops[ThreadJ]);
 
   // Unroll-Jam the innermost `i` loop by factor equal to trip count.
-  if (getConstantTripCount(computeLoops[ThreadJ]).hasValue()) {
+  if (!clDisableUnroll &&
+      getConstantTripCount(computeLoops[ThreadJ]).hasValue()) {
     auto status = loopUnrollJamByFactor(
         computeLoops[ThreadJ],
         getConstantTripCount(computeLoops[ThreadJ]).getValue());
@@ -709,21 +716,23 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
   }
 
   // Unroll the innermostLoop completely.
-  auto status = loopUnrollFull(computeLoops[ThreadK]);
-  assert(succeeded(status) && "Unable to unroll loop, please inspect the IR");
+  if (!clDisableUnroll) {
+    auto status = loopUnrollFull(computeLoops[ThreadK]);
+    assert(succeeded(status) && "Unable to unroll loop, please inspect the IR");
 
-  // Promote the now innermostLoop, which is the `k` loop.
-  (void)promoteIfSingleIteration(computeLoops[ThreadI]);
+    // Promote the now innermostLoop, which is the `k` loop.
+    (void)promoteIfSingleIteration(computeLoops[ThreadI]);
 
-  // We need to move ops from inside to the outside level which are invariant
-  // on the surrounding loop ivs. We handle side effecting operations in a
-  // special way, if the side effecting operations are loop invariant than
-  // they can be moved out. If the side effecting operations read and write to
-  // the same location then they can still be moved out of the loops using
-  // appropriate yield ops and also supplying loaded values back into the
-  // invariant loop as iter_args. This would also require substituing the
-  // usign values with the iter_arg.
-  moveInvariantLoadStorePairs(funcOp, b);
+    // We need to move ops from inside to the outside level which are invariant
+    // on the surrounding loop ivs. We handle side effecting operations in a
+    // special way, if the side effecting operations are loop invariant than
+    // they can be moved out. If the side effecting operations read and write to
+    // the same location then they can still be moved out of the loops using
+    // appropriate yield ops and also supplying loaded values back into the
+    // invariant loop as iter_args. This would also require substituing the
+    // usign values with the iter_arg.
+    moveInvariantLoadStorePairs(funcOp, b);
+  }
 }
 
 namespace mlir {
