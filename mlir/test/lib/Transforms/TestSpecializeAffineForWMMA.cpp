@@ -702,16 +702,15 @@ void TestSpecializeAffineForWMMA::runOnFunction() {
 
   // Unroll-Jam the innermost `i` loop by factor equal to trip count.
   if (getConstantTripCount(computeLoops[ThreadJ]).hasValue()) {
-    assert(loopUnrollJamByFactor(
-               computeLoops[ThreadJ],
-               getConstantTripCount(computeLoops[ThreadJ]).getValue())
-               .succeeded() &&
-           "Unable to unroll loop, please inspect the IR");
+    auto status = loopUnrollJamByFactor(
+        computeLoops[ThreadJ],
+        getConstantTripCount(computeLoops[ThreadJ]).getValue());
+    assert(succeeded(status) && "Unable to unroll loop, please inspect the IR");
   }
 
   // Unroll the innermostLoop completely.
-  assert(loopUnrollFull(computeLoops[ThreadK]).succeeded() &&
-         "Unable to unroll loop, please inspect the IR");
+  auto status = loopUnrollFull(computeLoops[ThreadK]);
+  assert(succeeded(status) && "Unable to unroll loop, please inspect the IR");
 
   // Promote the now innermostLoop, which is the `k` loop.
   (void)promoteIfSingleIteration(computeLoops[ThreadI]);
