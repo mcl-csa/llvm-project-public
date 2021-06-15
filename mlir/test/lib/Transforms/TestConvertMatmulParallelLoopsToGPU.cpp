@@ -30,6 +30,28 @@ using namespace mlir;
 using namespace mlir::scf;
 
 namespace {
+
+/// Holds thread and warp size constants, ops defining those constants, and
+/// other related thread/warp size information.
+struct ThreadAndWarpTileConfig {
+  Value numThreadsXYZ;
+  int64_t numThreadsXYZCst = -1;
+  Value linearTidXYZ;
+
+  int64_t warpSize = -1;
+  Value numWarps;
+  Value linearWarpId;
+
+  Value mTile;
+  int64_t mTileCst = -1;
+  Value nTile;
+  int64_t nTileCst = -1;
+  Value warpMtile;
+  int64_t warpMtileCst = -1;
+  Value warpNtile;
+  int64_t warpNtileCst = -1;
+};
+
 class TestConvertMatmulParallelLoopsToGPUPass
     : public PassWrapper<TestConvertMatmulParallelLoopsToGPUPass,
                          OperationPass<>> {
@@ -42,42 +64,43 @@ public:
   TestConvertMatmulParallelLoopsToGPUPass(){};
   TestConvertMatmulParallelLoopsToGPUPass(
       const TestConvertMatmulParallelLoopsToGPUPass &) {}
-  explicit TestConvertMatmulParallelLoopsToGPUPass(ArrayRef<int64_t> tbSizes) {
-    tbDimsRef = tbSizes;
+  explicit TestConvertMatmulParallelLoopsToGPUPass(ArrayRef<int64_t> tbSizes,
+                                                   int64_t warpSizeArg) {
+    tbDims = tbSizes;
+    fillTbDims();
+    warpSize = warpSizeArg;
   }
 
-  ListOption<int64_t> tbDimsRef{
+private:
+  void fillTbDims();
+
+  ListOption<int64_t> tbDims{
       *this, "block-dimensions", llvm::cl::MiscFlags::CommaSeparated,
       llvm::cl::desc("List of thread block dimensions for kernel launch.")};
 
   // Default warp size is 32.
-  Option<int64_t> warpSizeRef{
-      *this, "warp-size", llvm::cl::desc("Size of Warp"), llvm::cl::init(32)};
-
-  SmallVector<int64_t, 3> tbDims;
-
-  void filltbDims();
+  Option<int64_t> warpSize{*this, "warp-size", llvm::cl::desc("Size of Warp"),
+                           llvm::cl::init(32)};
 };
-} // end namespace
-
-namespace {
 
 struct LoopsToGpuLowering : public OpRewritePattern<ParallelOp> {
   using OpRewritePattern<ParallelOp>::OpRewritePattern;
-  explicit LoopsToGpuLowering(MLIRContext *context, ArrayRef<int64_t> tbSizes)
-      : OpRewritePattern<ParallelOp>(context), tbDims(tbSizes) {}
+  explicit LoopsToGpuLowering(MLIRContext *context, ArrayRef<int64_t> tbSizes,
+                              int64_t warpSizeArg)
+      : OpRewritePattern<ParallelOp>(context) {
+    tbDims.assign(tbSizes.begin(), tbSizes.end());
+    warpSize = warpSizeArg;
+  }
 
   LogicalResult matchAndRewrite(ParallelOp parallelOp,
                                 PatternRewriter &rewriter) const override;
 
 private:
-  ArrayRef<int64_t> tbDims;
+  /// The sizes of the thread block dimensions.
+  SmallVector<int64_t, 3> tbDims;
+  int64_t warpSize;
 };
 
-static int64_t warpSize;
-Value linearTidXYZ, numThreadsXYZ, linearWarpId, mTile, nTile, numWarps,
-    warpMtile, warpNtile;
-int64_t numThreadsXYZCst, mTileCst, nTileCst, warpMtileCst, warpNtileCst;
 static bool isMappedToProcessor(gpu::Processor processor) {
   return processor != gpu::Processor::Sequential;
 }
@@ -111,7 +134,8 @@ static unsigned getLaunchOpArgumentNum(gpu::Processor processor) {
 /// Checks if `parallelOp` is a copy loop/loop nest or not. Here we have taken a
 /// conservative approach for identifying copy loop. We define a loop as a
 /// copy loop if it consists of exactly one load op and one store op.
-bool checkIfCopyLoop(ParallelOp parallelOp) {
+//  TODO: replace this with a properly designed approach.
+bool isCopyLoop(ParallelOp parallelOp) {
   unsigned numLoad = 0, numStore = 0;
   parallelOp.walk([&](memref::LoadOp load) {
     if (load)
@@ -125,7 +149,7 @@ bool checkIfCopyLoop(ParallelOp parallelOp) {
     return true;
   return false;
 }
-} // namespace
+} // end anonymous namespace
 
 /// Inserts gpu.launch op parameters in `tbDimValues` and `gridDimValues`.
 static bool insertLaunchParams(ParallelOp parallelOp, ArrayRef<int64_t> tbDims,
@@ -289,15 +313,16 @@ static LogicalResult convertForLoop(gpu::LaunchOp launchOp, ForOp forOp,
 /// Convert parallel loops.
 static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
                                          ParallelOp parallelOp,
+                                         const ThreadAndWarpTileConfig &config,
                                          BlockAndValueMapping &cloningMap,
                                          SmallVectorImpl<Operation *> &worklist,
                                          PatternRewriter &rewriter) {
   Location loc = parallelOp.getLoc();
-  if (checkIfCopyLoop(parallelOp)) {
+  if (isCopyLoop(parallelOp)) {
     assert(parallelOp.getNumLoops() == 1 && "Expected a 1-d copy loop.");
-    // Copy loops are handeled specially. A copy loop is assumed to be 1-d and
+    // Copy loops are handled specially. A copy loop is assumed to be 1-d and
     // is distributed among the threads in a linear fashion so as to enable
-    // global memory coallescing.
+    // global memory coalescing.
     // TODO: Enable further optimizations such as prevention of shared memory
     // bank conflicts while loading the operands.
 
@@ -312,7 +337,8 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
              "expected upperBound of copy loop to be defined as a constant");
       int64_t upperBoundCst =
           static_cast<ConstantIndexOp>(upperBoundDefOp).getValue();
-      int64_t numElemsToCopyPerThreadCst = upperBoundCst / numThreadsXYZCst;
+      int64_t numElemsToCopyPerThreadCst =
+          upperBoundCst / config.numThreadsXYZCst;
 
       auto loopOp = rewriter.create<scf::ForOp>(
           loc, rewriter.create<ConstantIndexOp>(loc, 0),
@@ -320,11 +346,11 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
           rewriter.create<ConstantIndexOp>(loc, 1));
 
       rewriter.setInsertionPointToStart(loopOp.getBody());
-      Value ivNumThreads =
-          rewriter.create<MulIOp>(loc, loopOp.getInductionVar(), numThreadsXYZ);
-      Value newIndex = rewriter.create<AddIOp>(loc, linearTidXYZ, ivNumThreads);
-      loopOp->setAttr("isCopyLoopNest",
-                      BoolAttr::get(loopOp.getContext(), true));
+      Value ivNumThreads = rewriter.create<MulIOp>(
+          loc, loopOp.getInductionVar(), config.numThreadsXYZ);
+      Value newIndex =
+          rewriter.create<AddIOp>(loc, config.linearTidXYZ, ivNumThreads);
+      loopOp->setAttr("isCopyLoopNest", rewriter.getBoolAttr(true));
       // Put a sentinel into the worklist so we know when to pop out of the
       // loop body again. We use the launchOp here, as that cannot be part
       // of the bodies instruction.
@@ -370,7 +396,7 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
           // in the corresponding dimension. The upper bound need not be
           // changed. The step is equal to the thread block size in the
           // corresponding dimension.
-          // TODO: Intorduce the type of distribution as an attribute and
+          // TODO: Introduce the type of distribution as an attribute and
           // distribute the loop accordingly.
           auto loopOp = rewriter.create<scf::ForOp>(
               loc,
@@ -389,25 +415,27 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
         } else {
           Value loopOpLB, loopOpUB, loopOpStep;
           if (processor == gpu::Processor::WarpY) {
-            Value divNtileByWarpNtile =
-                rewriter.create<UnsignedDivIOp>(loc, nTile, warpNtile);
+            Value divNtileByWarpNtile = rewriter.create<UnsignedDivIOp>(
+                loc, config.nTile, config.warpNtile);
             Value cmpResult = rewriter.create<CmpIOp>(
-                loc, CmpIPredicate::ule, numWarps, divNtileByWarpNtile);
-            numWarpsInN = rewriter.create<SelectOp>(loc, cmpResult, numWarps,
-                                                    divNtileByWarpNtile);
-            numWarpsInM =
-                rewriter.create<UnsignedDivIOp>(loc, numWarps, numWarpsInN);
-            warpIdX =
-                rewriter.create<UnsignedRemIOp>(loc, linearWarpId, numWarpsInN);
-            warpIdY =
-                rewriter.create<UnsignedDivIOp>(loc, linearWarpId, numWarpsInN);
-            loopOpLB = rewriter.create<MulIOp>(loc, warpIdY, warpMtile);
-            loopOpUB = mTile;
-            loopOpStep = rewriter.create<MulIOp>(loc, warpMtile, numWarpsInM);
+                loc, CmpIPredicate::ule, config.numWarps, divNtileByWarpNtile);
+            numWarpsInN = rewriter.create<SelectOp>(
+                loc, cmpResult, config.numWarps, divNtileByWarpNtile);
+            numWarpsInM = rewriter.create<UnsignedDivIOp>(loc, config.numWarps,
+                                                          numWarpsInN);
+            warpIdX = rewriter.create<UnsignedRemIOp>(loc, config.linearWarpId,
+                                                      numWarpsInN);
+            warpIdY = rewriter.create<UnsignedDivIOp>(loc, config.linearWarpId,
+                                                      numWarpsInN);
+            loopOpLB = rewriter.create<MulIOp>(loc, warpIdY, config.warpMtile);
+            loopOpUB = config.mTile;
+            loopOpStep =
+                rewriter.create<MulIOp>(loc, config.warpMtile, numWarpsInM);
           } else if (processor == gpu::Processor::WarpX) {
-            loopOpLB = rewriter.create<MulIOp>(loc, warpIdX, warpNtile);
-            loopOpUB = nTile;
-            loopOpStep = rewriter.create<MulIOp>(loc, warpNtile, numWarpsInN);
+            loopOpLB = rewriter.create<MulIOp>(loc, warpIdX, config.warpNtile);
+            loopOpUB = config.nTile;
+            loopOpStep =
+                rewriter.create<MulIOp>(loc, config.warpNtile, numWarpsInN);
           }
           ForOp loopOp =
               rewriter.create<ForOp>(loc, loopOpLB, loopOpUB, loopOpStep);
@@ -430,11 +458,12 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
   return success();
 }
 
-// Doing pre computation stuff i.e. computing linear thread id, linear warp id,
-// number of threads.
-static void doPreComputationStuff(gpu::LaunchOp gpuLaunchOp,
-                                  ParallelOp parallelOp,
-                                  PatternRewriter &rewriter) {
+// Computes linear thread id, linear warp id, number of threads, and populating
+// these in `config`.
+static void generateThreadWarpIndexingInfo(gpu::LaunchOp gpuLaunchOp,
+                                           ParallelOp parallelOp,
+                                           ThreadAndWarpTileConfig &config,
+                                           PatternRewriter &rewriter) {
   assert(parallelOp.getNumLoops() >= 2 && "expected atleast a 2-d loop nest");
   Location loc = parallelOp.getLoc();
 
@@ -446,30 +475,34 @@ static void doPreComputationStuff(gpu::LaunchOp gpuLaunchOp,
   Value yIdXdim = rewriter.create<MulIOp>(loc, gpuLaunchOp.getThreadIds().y,
                                           gpuLaunchOp.blockSizeX());
   Value linearTidYZ = rewriter.create<AddIOp>(loc, zIdXdimYdim, yIdXdim);
-  linearTidXYZ =
+  config.linearTidXYZ =
       rewriter.create<AddIOp>(loc, linearTidYZ, gpuLaunchOp.getThreadIds().x);
-  Value constantWarpSize = rewriter.create<ConstantIndexOp>(loc, warpSize);
-  linearWarpId =
-      rewriter.create<UnsignedDivIOp>(loc, linearTidXYZ, constantWarpSize);
-  numWarps =
-      rewriter.create<UnsignedDivIOp>(loc, numThreadsXYZ, constantWarpSize);
+  Value constantWarpSize =
+      rewriter.create<ConstantIndexOp>(loc, config.warpSize);
+  config.linearWarpId = rewriter.create<UnsignedDivIOp>(
+      loc, config.linearTidXYZ, constantWarpSize);
+  config.numWarps = rewriter.create<UnsignedDivIOp>(loc, config.numThreadsXYZ,
+                                                    constantWarpSize);
 }
 
-/// Compute total number of threads.
-static void computeNumThreads(Location loc, PatternRewriter &rewriter) {
-  int64_t mByWarpM = mTileCst / warpMtileCst;
-  int64_t nByWarpN = nTileCst / warpNtileCst;
+/// Compute total number of threads and store these in `config`.
+static void computeNumThreads(Location loc, PatternRewriter &rewriter,
+                              ThreadAndWarpTileConfig &config) {
+  int64_t mByWarpM = config.mTileCst / config.warpMtileCst;
+  int64_t nByWarpN = config.nTileCst / config.warpNtileCst;
   int64_t mByWmIntoNbyWn = mByWarpM * nByWarpN;
   Value mByWmIntoNbyWnVal =
       rewriter.create<ConstantIndexOp>(loc, mByWmIntoNbyWn);
-  Value constantWarpSize = rewriter.create<ConstantIndexOp>(loc, warpSize);
-  numThreadsXYZ =
+  Value constantWarpSize =
+      rewriter.create<ConstantIndexOp>(loc, config.warpSize);
+  config.numThreadsXYZ =
       rewriter.create<MulIOp>(loc, mByWmIntoNbyWnVal, constantWarpSize);
-  numThreadsXYZCst = mByWmIntoNbyWn * warpSize;
+  config.numThreadsXYZCst = mByWmIntoNbyWn * config.warpSize;
 }
 
-/// Finds tile sizes.
-static void findTileSizes(ParallelOp parallelOp) {
+/// Finds tile sizes and populate these in `config`.
+static void findTileSizes(ParallelOp parallelOp,
+                          ThreadAndWarpTileConfig &config) {
   ParallelOp warpLoop;
   parallelOp.walk([&](ParallelOp op) {
     if (op.getNumLoops() == 2 && op != parallelOp) {
@@ -497,19 +530,20 @@ static void findTileSizes(ParallelOp parallelOp) {
   warpMtileDefOp = warpLoopSteps[0].getDefiningOp();
   warpNtileDefOp = warpLoopSteps[1].getDefiningOp();
 
-  assert(isa<ConstantIndexOp>(mTileDefOp) && isa<ConstantIndexOp>(nTileDefOp) &&
-         isa<ConstantIndexOp>(warpMtileDefOp) &&
-         isa<ConstantIndexOp>(warpNtileDefOp) &&
+  assert(isa_and_nonnull<ConstantIndexOp>(mTileDefOp) &&
+         isa_and_nonnull<ConstantIndexOp>(nTileDefOp) &&
+         isa_and_nonnull<ConstantIndexOp>(warpMtileDefOp) &&
+         isa_and_nonnull<ConstantIndexOp>(warpNtileDefOp) &&
          "expected constant steps for thread-block and warp loops");
 
-  mTile = threadBlockLoopSteps[0];
-  mTileCst = static_cast<ConstantIndexOp>(mTileDefOp).getValue();
-  nTile = threadBlockLoopSteps[1];
-  nTileCst = static_cast<ConstantIndexOp>(nTileDefOp).getValue();
-  warpMtile = warpLoopSteps[0];
-  warpMtileCst = static_cast<ConstantIndexOp>(warpMtileDefOp).getValue();
-  warpNtile = warpLoopSteps[1];
-  warpNtileCst = static_cast<ConstantIndexOp>(warpNtileDefOp).getValue();
+  config.mTile = threadBlockLoopSteps[0];
+  config.mTileCst = cast<ConstantIndexOp>(mTileDefOp).getValue();
+  config.nTile = threadBlockLoopSteps[1];
+  config.nTileCst = cast<ConstantIndexOp>(nTileDefOp).getValue();
+  config.warpMtile = warpLoopSteps[0];
+  config.warpMtileCst = cast<ConstantIndexOp>(warpMtileDefOp).getValue();
+  config.warpNtile = warpLoopSteps[1];
+  config.warpNtileCst = cast<ConstantIndexOp>(warpNtileDefOp).getValue();
 }
 
 LogicalResult
@@ -525,30 +559,31 @@ LoopsToGpuLowering::matchAndRewrite(ParallelOp parallelOp,
   gridDimValues.insert(gridDimValues.end(), 3 - gridDimValues.size(),
                        constantOne);
 
-  findTileSizes(parallelOp);
-  computeNumThreads(topLoc, rewriter);
+  ThreadAndWarpTileConfig config;
+  config.warpSize = warpSize;
+  findTileSizes(parallelOp, config);
+  computeNumThreads(topLoc, rewriter, config);
   gpu::LaunchOp launchOp = rewriter.create<gpu::LaunchOp>(
       parallelOp.getLoc(), gridDimValues[0], gridDimValues[1], gridDimValues[2],
-      numThreadsXYZ, tbDimValues[1], tbDimValues[2]);
+      config.numThreadsXYZ, tbDimValues[1], tbDimValues[2]);
 
   rewriter.setInsertionPointToEnd(&launchOp.body().front());
   rewriter.create<gpu::TerminatorOp>(topLoc);
   rewriter.setInsertionPointToStart(&launchOp.body().front());
 
-  // Doing Pre Computation Stuff.
-  doPreComputationStuff(launchOp, parallelOp, rewriter);
+  generateThreadWarpIndexingInfo(launchOp, parallelOp, config, rewriter);
 
   BlockAndValueMapping cloningMap;
   SmallVector<Operation *, 16> worklist;
-  if (failed(convertParallelLoop(launchOp, parallelOp, cloningMap, worklist,
-                                 rewriter)))
+  if (failed(convertParallelLoop(launchOp, parallelOp, config, cloningMap,
+                                 worklist, rewriter)))
     return failure();
 
   while (!worklist.empty()) {
     Operation *op = worklist.pop_back_val();
     if (auto nestedParallel = dyn_cast<ParallelOp>(op)) {
-      if (failed(convertParallelLoop(launchOp, nestedParallel, cloningMap,
-                                     worklist, rewriter)))
+      if (failed(convertParallelLoop(launchOp, nestedParallel, config,
+                                     cloningMap, worklist, rewriter)))
         return failure();
     } else if (op == launchOp.getOperation()) {
       auto *parent = rewriter.getInsertionPoint()->getParentOp();
@@ -586,24 +621,23 @@ LoopsToGpuLowering::matchAndRewrite(ParallelOp parallelOp,
 
 static void populateConvertSCFToGPUPatterns(OwningRewritePatternList &patterns,
                                             MLIRContext *ctx,
-                                            ArrayRef<int64_t> tbDims) {
-  patterns.insert<LoopsToGpuLowering>(ctx, tbDims);
+                                            ArrayRef<int64_t> tbDims,
+                                            int64_t warpSize) {
+  patterns.insert<LoopsToGpuLowering>(ctx, tbDims, warpSize);
 }
 
-void TestConvertMatmulParallelLoopsToGPUPass::filltbDims() {
-  for (int i = 0, e = tbDimsRef.size(); i < 3; ++i) {
-    if (i < e)
-      tbDims.push_back(tbDimsRef[i]);
-    else
-      tbDims.push_back(1);
+/// Fill thread block dims with default value one if not provided.
+void TestConvertMatmulParallelLoopsToGPUPass::fillTbDims() {
+  for (unsigned i = this->tbDims.size(); i < 3; ++i) {
+    this->tbDims.push_back(1);
   }
 }
 
 void TestConvertMatmulParallelLoopsToGPUPass::runOnOperation() {
-  warpSize = warpSizeRef;
-  filltbDims();
+  fillTbDims();
   OwningRewritePatternList patterns(&getContext());
-  populateConvertSCFToGPUPatterns(patterns, &getContext(), tbDims);
+  populateConvertSCFToGPUPatterns(patterns, &getContext(), this->tbDims,
+                                  this->warpSize);
   ConversionTarget target(getContext());
   target.addLegalDialect<StandardOpsDialect>();
   target.addLegalDialect<AffineDialect>();
