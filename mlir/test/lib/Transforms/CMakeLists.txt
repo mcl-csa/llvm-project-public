@@ -27,10 +27,10 @@ add_mlir_library(MLIRTestTransforms
 
   LINK_LIBS PUBLIC
   MLIRAffineTransforms
+  MLIRGPUOps
   MLIRTestDialect
   MLIRTransforms
   MLIRTransformUtils
-  MLIRGPU
   )
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../Dialect/Test)

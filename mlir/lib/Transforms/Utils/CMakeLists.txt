@@ -18,6 +18,7 @@ add_mlir_library(MLIRTransformUtils
   LINK_LIBS PUBLIC
   MLIRAffine
   MLIRAnalysis
+  MLIRGPUOps
   MLIRLoopAnalysis
   MLIRMemRef
   MLIRSCF
