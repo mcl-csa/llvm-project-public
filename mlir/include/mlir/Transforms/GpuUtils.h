@@ -12,16 +12,23 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Support/LLVM.h"
+#include "llvm/ADT/StringRef.h"
 #include <string>
 
 namespace mlir {
 
 class AffineForOp;
+struct LogicalResult;
 
 /// Creates fast buffers (in memory space == 3) and places the specified
 /// matrices into them.
 void createAndPlaceFastBuffersForGpuMatmul(
     AffineForOp forOp, ArrayRef<std::string> matricesToPlace,
     bool useStackAllocation, bool useGlobalAllocation);
+
+/// Map an affine.for nest to WMMA ops.
+LogicalResult mapAffineNestToWmma(AffineForOp rootForOp,
+                                  StringRef accumulateType,
+                                  bool enableUnroll = true);
 
 } // namespace mlir
