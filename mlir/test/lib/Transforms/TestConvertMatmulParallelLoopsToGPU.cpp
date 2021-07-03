@@ -7,7 +7,8 @@
 //===----------------------------------------------------------------------===//
 //
 // This file implements a pass to test the conversion of parallel loops to gpu
-// for matmul.
+// for matmul. Here, we have assumed that the loops are not being normalized in
+// the input IR to this pass.
 //
 //===----------------------------------------------------------------------===//
 
@@ -74,11 +75,13 @@ public:
 private:
   void fillTbDims();
 
+  /// `tbDims` contains the thread block size for x, y, and z dimensions.
   ListOption<int64_t> tbDims{
       *this, "block-dimensions", llvm::cl::MiscFlags::CommaSeparated,
       llvm::cl::desc("List of thread block dimensions for kernel launch.")};
 
-  // Default warp size is 32.
+  /// The size of the warp is a hardware property, and its value by default is
+  ///  32.
   Option<int64_t> warpSize{*this, "warp-size", llvm::cl::desc("Size of Warp"),
                            llvm::cl::init(32)};
 };
@@ -521,6 +524,9 @@ static void findTileSizes(ParallelOp parallelOp,
   });
   assert(warpLoop && "warp loop not found");
   assert(warpLoop.getNumLoops() == 2 && "Not a 2-d warp loop");
+  // Here, we have assumed that the loops are not being normalized in the
+  // input IR to this pass. The steps of the thread-block loop nest and warp
+  // loop nest are used to compute the total number of threads to be launched.
   SmallVector<Value, 2> threadBlockLoopSteps(parallelOp.step());
   SmallVector<Value, 2> warpLoopSteps(warpLoop.step());
   Operation *mTileDefOp, *nTileDefOp, *warpMtileDefOp, *warpNtileDefOp;
@@ -579,6 +585,8 @@ LoopsToGpuLowering::matchAndRewrite(ParallelOp parallelOp,
                                  worklist, rewriter)))
     return failure();
 
+  // `worklist` is the list of operations present inside the parallel loop,
+  // which is converted into the gpu::LaunchOp.
   while (!worklist.empty()) {
     Operation *op = worklist.pop_back_val();
     if (auto nestedParallel = dyn_cast<ParallelOp>(op)) {

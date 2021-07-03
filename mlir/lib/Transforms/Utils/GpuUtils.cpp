@@ -44,6 +44,9 @@ void mlir::createAndPlaceFastBuffersForGpuMatmul(
     inputMemrefs.push_back(loadOp.getMemRef());
   });
 
+  assert(inputMemrefs.size() > 1 && "Expected at least two load operations");
+  assert(outputMemRef && "Expected at least one store operations");
+
   // Intialize the copy options for placing matrices into fast buffers.
   AffineCopyOptions copyOptions = {
       /*generateDma=*/false,
