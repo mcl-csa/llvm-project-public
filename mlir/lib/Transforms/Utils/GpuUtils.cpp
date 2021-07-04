@@ -103,30 +103,24 @@ void mlir::createAndPlaceFastBuffersForGpuMatmul(
 /// loops. Three loops are the minimum number of loops that are to be present
 /// in matrix multiplication. Since copy loops may also be present in the code,
 /// The input may not be perfectly nested. Assuming that the copy loops are
-/// annotated we can find differentiate them from the compute loops.
+/// annotated and we find the loops without such an attribute from outermost to
+/// innermost in `computeLoops`.
+//  TODO/FIXME: make this more systematic.
 static void findComputeLoops(AffineForOp rootForOp,
                              SmallVector<AffineForOp> &computeLoops) {
   bool nestedForExists = true;
-
   while (nestedForExists) {
     nestedForExists = false;
     computeLoops.push_back(rootForOp);
     // Scan for other for loops in the body which are not copy loops.
-    Block &body = rootForOp.getLoopBody().front();
-
-    for (auto op = body.begin(), e = body.end(); op != e; ++op) {
-      if (auto forOp = dyn_cast<AffineForOp>(op)) {
-        // FIXME: get rid of hardcoded attributes
-        // isCopyLoopNest/isComputeLoopNest.
-        if (BoolAttr attr = forOp->getAttrOfType<BoolAttr>("isCopyLoopNest")) {
-          // Make this forOp the next root.
-          // TODO: Insert assertion for multiple non-copy loop children of this
-          // for op.
-          if (!attr.getValue()) {
-            rootForOp = forOp;
-            nestedForExists = true;
-          }
-        }
+    for (auto forOp : rootForOp.getOps<AffineForOp>()) {
+      // FIXME: get rid of hardcoded attributes
+      // isCopyLoopNest/isComputeLoopNest.
+      auto attr = forOp->getAttrOfType<BoolAttr>("isCopyLoopNest");
+      if (!attr || !attr.getValue()) {
+        // Make this forOp the next root.
+        // TODO: Insert assertion for multiple non-copy loop children of this
+        // for op.
         rootForOp = forOp;
         nestedForExists = true;
       }
