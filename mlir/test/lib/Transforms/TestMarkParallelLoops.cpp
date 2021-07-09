@@ -45,13 +45,7 @@ void TestMarkParallelLoops::runOnFunction() {
 
   // Check and mark the parallel loops in the IR.
   funcOp.walk([&](AffineForOp loop) {
-    Optional<uint64_t> tripCount = getConstantTripCount(loop);
-    // If the is single iteration we conservatively treat it as sequential.
-    if (tripCount.hasValue() && tripCount.getValue() == 1) {
-      // Do Nothing.
-    }
-
-    else if (isLoopParallel(loop)) {
+    if (isLoopParallel(loop)) {
       loop->setAttr(TestMarkParallelLoops::isParallel,
                     BoolAttr::get(loop.getContext(), true));
     }
