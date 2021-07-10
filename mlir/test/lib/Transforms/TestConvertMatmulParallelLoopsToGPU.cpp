@@ -330,25 +330,36 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
     // bank conflicts while loading the operands.
 
     // Single iteration for.
-    for (auto loop : llvm::zip(parallelOp.getInductionVars(),
-                               parallelOp.upperBound(), parallelOp.step())) {
-      Value iv, upperBound, step;
-      std::tie(iv, upperBound, step) = loop;
+    for (auto loop :
+         llvm::zip(parallelOp.getInductionVars(), parallelOp.upperBound())) {
+      Value iv, upperBound;
+      std::tie(iv, upperBound) = loop;
 
       Operation *upperBoundDefOp = upperBound.getDefiningOp();
       assert(isa<ConstantIndexOp>(upperBoundDefOp) &&
              "expected upperBound of copy loop to be defined as a constant");
       int64_t upperBoundCst =
           static_cast<ConstantIndexOp>(upperBoundDefOp).getValue();
+
+      // Calculate the number of elements each thread has to copy. The upper
+      // bound here already accounts for vectorization.
       int64_t numElemsToCopyPerThreadCst =
           upperBoundCst / config.numThreadsXYZCst;
 
+      // Create a new for loop of the following form:-
+      //    scf.for %i = %cst0 to %numElemsToCopyPerThread step %cst1
       auto loopOp = rewriter.create<scf::ForOp>(
           loc, rewriter.create<ConstantIndexOp>(loc, 0),
           rewriter.create<ConstantIndexOp>(loc, numElemsToCopyPerThreadCst),
           rewriter.create<ConstantIndexOp>(loc, 1));
 
       rewriter.setInsertionPointToStart(loopOp.getBody());
+      // Calculate the acutal index form where this thread. The index is given
+      // by:-   (iv * numThreadsXYZ) + linearTidXYZ.
+      // All threads in parallel copy their respective elements, the next
+      // element to be copied by a thread lies after `iv * numThreadsXYZ`
+      // elements. Finally adding linearThreadId shifts the index to the correct
+      // position.
       Value ivNumThreads = rewriter.create<MulIOp>(
           loc, loopOp.getInductionVar(), config.numThreadsXYZ);
       Value newIndex =
