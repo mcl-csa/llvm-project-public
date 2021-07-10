@@ -259,22 +259,22 @@ module  {
 }
 
 // CHECK:     gpu.launch blocks({{.*}}) in ({{.*}}) threads({{.*}}) in ({{.*}}) {
-// CHECK:       scf.for %arg12 = %29 to %c128 step %c128 {
-// CHECK:         scf.for %arg13 = %30 to %c64 step %c64 {
+// CHECK:       scf.for %arg12 = %{{.*}} to %c128 step %c128 {
+// CHECK:         scf.for %arg13 = %{{.*}} to %c64 step %c64 {
 // CHECK:           scf.for %arg14 = %c0 to %c4 step %c1 {
 // CHECK:           } {isCopyLoopNest = true}
 // CHECK:           scf.for %arg14 = %c0 to %c8 step %c1 {
 // CHECK:           } {isCopyLoopNest = true}
 // CHECK:           gpu.barrier
-// CHECK:           %45:8 = scf.for %arg14 = %c0 to %c960 step %c64 iter_args(%arg15 = %33, %arg16 = %35, %arg17 = %37, %arg18 = %39, %arg19 = %41, %arg20 = %42, %arg21 = %43, %arg22 = %44) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+// CHECK:           %45:8 = scf.for %arg14 = %c0 to %c960 step %c64 {{.*}} {
 // CHECK:             scf.for %arg23 = %c0 to %c4 step %c1 {
 // CHECK:             } {isCopyLoopNest = true}
 // CHECK:             scf.for %arg23 = %c0 to %c8 step %c1 {
 // CHECK:             } {isCopyLoopNest = true}
-// CHECK:             %47:8 = scf.for %arg23 = %c0 to %c64 step %c16 iter_args(%arg24 = %arg15, %arg25 = %arg16, %arg26 = %arg17, %arg27 = %arg18, %arg28 = %arg19, %arg29 = %arg20, %arg30 = %arg21, %arg31 = %arg22) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+// CHECK:             %47:8 = scf.for %arg23 = %c0 to %c64 step %c16 {{.*}} {
 // CHECK:           }
 // CHECK:           gpu.barrier
-// CHECK:           %46:8 = scf.for %arg14 = %c0 to %c64 step %c16 iter_args(%arg15 = %45#0, %arg16 = %45#1, %arg17 = %45#2, %arg18 = %45#3, %arg19 = %45#4, %arg20 = %45#5, %arg21 = %45#6, %arg22 = %45#7) -> (!gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">, !gpu.mma_matrix<16x16xf32, "COp">) {
+// CHECK:           %46:8 = scf.for %arg14 = %c0 to %c64 step %c16 {{.*}} {
 // CHECK:           }
 // CHECK:         }
 // CHECK:       }

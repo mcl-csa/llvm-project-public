@@ -379,6 +379,24 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
       return parallelOp.emitOpError("expected mapping attribute");
 
     Value numWarpsInN, numWarpsInM, warpIdX, warpIdY;
+    // Calculate number of warps in `n` dimension.
+    Value divNtileByWarpNtile =
+        rewriter.create<UnsignedDivIOp>(loc, config.nTile, config.warpNtile);
+    // Check if the number of warps in `n` dimension is actually greater
+    // than the total number of warps available. If not, then all the
+    // warp are given to the `n` dimension else they are distributed
+    // among both `m` and `n` dimensions.
+    Value cmpResult = rewriter.create<CmpIOp>(
+        loc, CmpIPredicate::ule, config.numWarps, divNtileByWarpNtile);
+    numWarpsInN = rewriter.create<SelectOp>(loc, cmpResult, config.numWarps,
+                                            divNtileByWarpNtile);
+    numWarpsInM =
+        rewriter.create<UnsignedDivIOp>(loc, config.numWarps, numWarpsInN);
+    // Calculate the coordinates inside a thread block tile.
+    warpIdX =
+        rewriter.create<UnsignedRemIOp>(loc, config.linearWarpId, numWarpsInN);
+    warpIdY =
+        rewriter.create<UnsignedDivIOp>(loc, config.linearWarpId, numWarpsInN);
 
     for (auto loop : llvm::zip(mapping, parallelOp.getInductionVars(),
                                parallelOp.lowerBound(), parallelOp.upperBound(),
@@ -430,28 +448,46 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
       } else {
         Value loopOpLB, loopOpUB, loopOpStep;
         if (processor == gpu::Processor::WarpY) {
-          Value divNtileByWarpNtile = rewriter.create<UnsignedDivIOp>(
-              loc, config.nTile, config.warpNtile);
-          Value cmpResult = rewriter.create<CmpIOp>(
-              loc, CmpIPredicate::ule, config.numWarps, divNtileByWarpNtile);
-          numWarpsInN = rewriter.create<SelectOp>(
-              loc, cmpResult, config.numWarps, divNtileByWarpNtile);
-          numWarpsInM = rewriter.create<UnsignedDivIOp>(loc, config.numWarps,
-                                                        numWarpsInN);
-          warpIdX = rewriter.create<UnsignedRemIOp>(loc, config.linearWarpId,
-                                                    numWarpsInN);
-          warpIdY = rewriter.create<UnsignedDivIOp>(loc, config.linearWarpId,
-                                                    numWarpsInN);
+          // Loop LB is WarpIdY * WarpMtile.
           loopOpLB = rewriter.create<MulIOp>(loc, warpIdY, config.warpMtile);
+          // Loop UB is Corresponding thread block tile dimension.
           loopOpUB = config.mTile;
+          // A single warp now jumps to another place inside the TBTile to
+          // process some other warp tile in the corresponding dimension.
           loopOpStep =
               rewriter.create<MulIOp>(loc, config.warpMtile, numWarpsInM);
         } else if (processor == gpu::Processor::WarpX) {
+          // Loop LB is WarpIdX * WarpNtile.
           loopOpLB = rewriter.create<MulIOp>(loc, warpIdX, config.warpNtile);
+          // Loop UB is Corresponding thread block tile dimension.
           loopOpUB = config.nTile;
+          // A single warp now jumps to another place inside the TBTile to
+          // process some other warp tile in the corresponding dimension.
           loopOpStep =
               rewriter.create<MulIOp>(loc, config.warpNtile, numWarpsInN);
         }
+        // This loop represents the task done by a warp in a thread block
+        // tile. If the warp is calculating more than one warp tile, this loop
+        // will move the warp to each tile one by one. For e.g., below is a
+        // thread block tile being calculated by four warps. The loop will
+        // make the `W0` jump to the third tile in first row after it has
+        // processed the first tile in the first row, i.e., it moves with a
+        // step equal to `warpNtile * numWarpsInN`. Movement of other warps
+        // can be similarly visualized.
+        // |-------------------------------------------------------------|
+        // |            |              |                |                |
+        // |    W0      |       W1     |       W0       |      W1        |
+        // |            |              |                |                |
+        // |-------------------------------------------------------------|
+        // |            |              |                |                |
+        // |    W2      |       W3     |       W2       |      W3        |
+        // |            |              |                |                |
+        // |------------|--------------|----------------|----------------|
+        // The current mapping however assumes that a single warp will
+        // calculate a single warp tile, but this mapping will come handy when
+        // we decouple the calculation of number of warps inside a thread
+        // block using the tiling parameters and instead take the number of
+        // warps from the user.
         ForOp loopOp =
             rewriter.create<ForOp>(loc, loopOpLB, loopOpUB, loopOpStep);
         Value newIndex = loopOp.getInductionVar();
