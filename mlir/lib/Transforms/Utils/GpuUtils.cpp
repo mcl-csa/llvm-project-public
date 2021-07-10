@@ -165,8 +165,8 @@ constexpr static unsigned kWMMAK = 16;
 ///		    Inter Thread-Block loops(i,j,k)
 ///		      Inter Warp loops(ii, jj, kk)
 ///			Intra Warp loops(iii, jjj, kkk)
-static void inspectTileStructure(ArrayRef<AffineForOp> computeLoops,
-                                 ArrayRef<Value> loopsIVs) {
+static LogicalResult inspectTileStructure(ArrayRef<AffineForOp> computeLoops,
+                                          ArrayRef<Value> loopsIVs) {
   unsigned curMapStage = 0;
   for (AffineForOp loop : computeLoops.drop_front(kNumIntialLoops)) {
     if (loop.hasConstantBounds())
@@ -184,11 +184,15 @@ static void inspectTileStructure(ArrayRef<AffineForOp> computeLoops,
         foundDependentLoopIV = true;
     }
 
-    assert(foundDependentLoopIV &&
-           "Recipe for tensor core matmul failed, improperly tiled loop nest");
+    if (foundDependentLoopIV) {
+      computeLoops.front()->emitError(
+          "Recipe for tensor core matmul failed, improperly tiled loop nest");
+      return failure();
+    }
     ++curMapStage;
     curMapStage %= kNumIntialLoops;
   }
+  return success();
 }
 
 /// Checks whether a given op is hoistable with respect to a forOp.
@@ -471,7 +475,8 @@ LogicalResult mlir::mapAffineNestToWmma(AffineForOp rootForOp,
   }
 
   // Check the tiling order of loops.
-  inspectTileStructure(computeLoops, loopsIVs);
+  if (failed(inspectTileStructure(computeLoops, loopsIVs)))
+    return failure();
 
   // Insert GPU MMA ops in the innermost loop nest. This involves changing the
   // loop steps of the surrounding loops. To the size of WMMA operation and
@@ -508,14 +513,13 @@ LogicalResult mlir::mapAffineNestToWmma(AffineForOp rootForOp,
 
   // Helper to emit indices as affine.apply's for a load/store op.
   auto emitIndices = [&](SmallVector<Value> &index,
-                         SmallVector<Value> &valueOperands, AffineMap &opMap,
-                         MutableArrayRef<OpOperand> &operands) {
-    for (auto operand = operands.begin(), e = operands.end(); operand < e;
-         ++operand) {
-      if (operand->get() == innermostLoop.getInductionVar()) {
+                         SmallVector<Value> &valueOperands, AffineMap opMap,
+                         ValueRange operands) {
+    for (auto operand : operands) {
+      if (operand == innermostLoop.getInductionVar()) {
         valueOperands.push_back(newInnermostLoop.getInductionVar());
       } else {
-        valueOperands.push_back(operand->get());
+        valueOperands.push_back(operand);
       }
     }
 
@@ -539,13 +543,13 @@ LogicalResult mlir::mapAffineNestToWmma(AffineForOp rootForOp,
     SmallVector<Value> index;
     SmallVector<Value> valueOperands;
     AffineMap opMap;
-    MutableArrayRef<OpOperand> operands;
+    ValueRange operands;
     if (auto loadOp = dyn_cast<AffineLoadOp>(op)) {
       assert(numOpsProcessed <= 2 &&
              "Recipe for tensor core matmul failed, "
              "innermost body probably doesn't represent a matmul");
       opMap = loadOp.getAffineMap();
-      operands = loadOp->getOpOperands().drop_front(1);
+      operands = loadOp.indices();
 
       // Emit affine.apply's for each index.
       emitIndices(index, valueOperands, opMap, operands);
@@ -578,7 +582,7 @@ LogicalResult mlir::mapAffineNestToWmma(AffineForOp rootForOp,
             wmmaOps[numOpsProcessed - 1]));
 
         opMap = storeOp.getAffineMap();
-        operands = storeOp->getOpOperands().drop_front(2);
+        operands = storeOp.indices();
 
         // Emit affine.apply's for each index.
         emitIndices(index, valueOperands, opMap, operands);
