@@ -382,74 +382,74 @@ static LogicalResult convertParallelLoop(gpu::LaunchOp launchOp,
                << "expected mapping attribute for lowering to GPU";
       gpu::Processor processor = gpu::getProcessor(annotation);
       // Checks if the loop is mapped to some processor or it is sequental.
-      if (isMappedToProcessor(processor)) {
-        // Checks if the loop is mapped to a grid.
-        if (processor < gpu::Processor::ThreadX) {
-          // Use the corresponding grid index as replacement for the loop
-          // iv.
-          Value operand =
-              launchOp.body().getArgument(getLaunchOpArgumentNum(processor));
-          Value mulWithStep = rewriter.create<MulIOp>(loc, operand, step);
-          Value newIV = rewriter.create<AddIOp>(loc, lowerBound, mulWithStep);
-          cloningMap.map(iv, newIV);
-        } else if (processor < gpu::Processor::WarpX) {
-          // The parallel op is mapped to threads. For now distribute this
-          // cyclically among the threads in a thread block. In a cyclic
-          // distribution the lower bound of the loop is equal to the thread id
-          // in the corresponding dimension. The upper bound need not be
-          // changed. The step is equal to the thread block size in the
-          // corresponding dimension.
-          // TODO: Introduce the type of distribution as an attribute and
-          // distribute the loop accordingly.
-          auto loopOp = rewriter.create<scf::ForOp>(
-              loc,
-              launchOp.body().getArgument(getLaunchOpArgumentNum(processor) -
-                                          3),
-              cloningMap.lookupOrDefault(upperBound),
-              cloningMap.lookupOrDefault(
-                  launchOp.getOperand(getLaunchOpArgumentNum(processor) - 3)));
-          Value newIndex = loopOp.getInductionVar();
-          rewriter.setInsertionPointToStart(loopOp.getBody());
-          // Put a sentinel into the worklist so we know when to pop out of the
-          // loop body again. We use the launchOp here, as that cannot be part
-          // of the bodies instruction.
-          worklist.push_back(launchOp.getOperation());
-          cloningMap.map(iv, newIndex);
-        } else {
-          Value loopOpLB, loopOpUB, loopOpStep;
-          if (processor == gpu::Processor::WarpY) {
-            Value divNtileByWarpNtile = rewriter.create<UnsignedDivIOp>(
-                loc, config.nTile, config.warpNtile);
-            Value cmpResult = rewriter.create<CmpIOp>(
-                loc, CmpIPredicate::ule, config.numWarps, divNtileByWarpNtile);
-            numWarpsInN = rewriter.create<SelectOp>(
-                loc, cmpResult, config.numWarps, divNtileByWarpNtile);
-            numWarpsInM = rewriter.create<UnsignedDivIOp>(loc, config.numWarps,
-                                                          numWarpsInN);
-            warpIdX = rewriter.create<UnsignedRemIOp>(loc, config.linearWarpId,
-                                                      numWarpsInN);
-            warpIdY = rewriter.create<UnsignedDivIOp>(loc, config.linearWarpId,
-                                                      numWarpsInN);
-            loopOpLB = rewriter.create<MulIOp>(loc, warpIdY, config.warpMtile);
-            loopOpUB = config.mTile;
-            loopOpStep =
-                rewriter.create<MulIOp>(loc, config.warpMtile, numWarpsInM);
-          } else if (processor == gpu::Processor::WarpX) {
-            loopOpLB = rewriter.create<MulIOp>(loc, warpIdX, config.warpNtile);
-            loopOpUB = config.nTile;
-            loopOpStep =
-                rewriter.create<MulIOp>(loc, config.warpNtile, numWarpsInN);
-          }
-          ForOp loopOp =
-              rewriter.create<ForOp>(loc, loopOpLB, loopOpUB, loopOpStep);
-          Value newIndex = loopOp.getInductionVar();
-          rewriter.setInsertionPointToStart(loopOp.getBody());
-          // Put a sentinel into the worklist so we know when to pop out of the
-          // loop body again. We use the launchOp here, as that cannot be part
-          // of the bodies instruction.
-          worklist.push_back(launchOp.getOperation());
-          cloningMap.map(iv, newIndex);
+      if (!isMappedToProcessor(processor))
+        continue;
+
+      // Checks if the loop is mapped to a grid.
+      if (processor < gpu::Processor::ThreadX) {
+        // Use the corresponding grid index as replacement for the loop
+        // iv.
+        Value operand =
+            launchOp.body().getArgument(getLaunchOpArgumentNum(processor));
+        Value mulWithStep = rewriter.create<MulIOp>(loc, operand, step);
+        Value newIV = rewriter.create<AddIOp>(loc, lowerBound, mulWithStep);
+        cloningMap.map(iv, newIV);
+      } else if (processor < gpu::Processor::WarpX) {
+        // The parallel op is mapped to threads. For now distribute this
+        // cyclically among the threads in a thread block. In a cyclic
+        // distribution the lower bound of the loop is equal to the thread id
+        // in the corresponding dimension. The upper bound need not be
+        // changed. The step is equal to the thread block size in the
+        // corresponding dimension.
+        // TODO: Introduce the type of distribution as an attribute and
+        // distribute the loop accordingly.
+        auto loopOp = rewriter.create<scf::ForOp>(
+            loc,
+            launchOp.body().getArgument(getLaunchOpArgumentNum(processor) - 3),
+            cloningMap.lookupOrDefault(upperBound),
+            cloningMap.lookupOrDefault(
+                launchOp.getOperand(getLaunchOpArgumentNum(processor) - 3)));
+        Value newIndex = loopOp.getInductionVar();
+        rewriter.setInsertionPointToStart(loopOp.getBody());
+        // Put a sentinel into the worklist so we know when to pop out of the
+        // loop body again. We use the launchOp here, as that cannot be part
+        // of the bodies instruction.
+        worklist.push_back(launchOp.getOperation());
+        cloningMap.map(iv, newIndex);
+      } else {
+        Value loopOpLB, loopOpUB, loopOpStep;
+        if (processor == gpu::Processor::WarpY) {
+          Value divNtileByWarpNtile = rewriter.create<UnsignedDivIOp>(
+              loc, config.nTile, config.warpNtile);
+          Value cmpResult = rewriter.create<CmpIOp>(
+              loc, CmpIPredicate::ule, config.numWarps, divNtileByWarpNtile);
+          numWarpsInN = rewriter.create<SelectOp>(
+              loc, cmpResult, config.numWarps, divNtileByWarpNtile);
+          numWarpsInM = rewriter.create<UnsignedDivIOp>(loc, config.numWarps,
+                                                        numWarpsInN);
+          warpIdX = rewriter.create<UnsignedRemIOp>(loc, config.linearWarpId,
+                                                    numWarpsInN);
+          warpIdY = rewriter.create<UnsignedDivIOp>(loc, config.linearWarpId,
+                                                    numWarpsInN);
+          loopOpLB = rewriter.create<MulIOp>(loc, warpIdY, config.warpMtile);
+          loopOpUB = config.mTile;
+          loopOpStep =
+              rewriter.create<MulIOp>(loc, config.warpMtile, numWarpsInM);
+        } else if (processor == gpu::Processor::WarpX) {
+          loopOpLB = rewriter.create<MulIOp>(loc, warpIdX, config.warpNtile);
+          loopOpUB = config.nTile;
+          loopOpStep =
+              rewriter.create<MulIOp>(loc, config.warpNtile, numWarpsInN);
         }
+        ForOp loopOp =
+            rewriter.create<ForOp>(loc, loopOpLB, loopOpUB, loopOpStep);
+        Value newIndex = loopOp.getInductionVar();
+        rewriter.setInsertionPointToStart(loopOp.getBody());
+        // Put a sentinel into the worklist so we know when to pop out of the
+        // loop body again. We use the launchOp here, as that cannot be part
+        // of the bodies instruction.
+        worklist.push_back(launchOp.getOperation());
+        cloningMap.map(iv, newIndex);
       }
     }
   }
