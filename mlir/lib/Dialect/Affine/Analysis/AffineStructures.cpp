@@ -18,6 +18,7 @@
 #include "mlir/Dialect/Affine/IR/AffineValueMap.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/AffineExprVisitor.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/MathExtras.h"
@@ -40,8 +41,12 @@ void FlatAffineValueConstraints::addInductionVarOrTerminalSymbol(Value val) {
     return;
 
   // Caller is expected to fully compose map/operands if necessary.
-  assert((isTopLevelValue(val) || isAffineInductionVar(val)) &&
-         "non-terminal symbol / loop IV expected");
+  if(!((isTopLevelValue(val))||(isAffineInductionVar(val)))){
+    val.getDefiningOp()->emitError()<<" Above Val is neither defined as a Top-Level Value nor is an AffineInductionVar. Non-terminal symbol / loop IV expected. Pass Aborted!";
+    exit(1);
+  }
+  //assert((isTopLevelValue(val) || isAffineInductionVar(val)) &&
+        //  "non-terminal symbol / loop IV expected");
   // Outer loop IVs could be used in forOp's bounds.
   if (auto loop = getForInductionVarOwner(val)) {
     appendDimVar(val);
@@ -222,8 +227,8 @@ LogicalResult FlatAffineValueConstraints::addBound(BoundType type, unsigned pos,
   fullyComposeAffineMapAndOperands(&map, &operands);
   map = simplifyAffineMap(map);
   canonicalizeMapAndOperands(&map, &operands);
-  for (auto operand : operands)
-    addInductionVarOrTerminalSymbol(operand);
+  for (auto operand : operands){
+    addInductionVarOrTerminalSymbol(operand);}
   return addBound(type, pos, computeAlignedMap(map, operands));
 }
 
