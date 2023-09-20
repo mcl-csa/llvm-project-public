@@ -237,6 +237,12 @@ void LoopTiling::getTileSizes(ArrayRef<AffineForOp> band,
 }
 
 void LoopTiling::runOnOperation() {
+  if(cacheSizeInKiB <= 0)
+  {
+    Builder b = Builder(getOperation()->getContext());
+    emitError(b.getUnknownLoc(), "Illegal Argument: '--affine-loop-tile=cache-size' cannot be less than or equal to zero. LoopTiling Pass Aborted!");
+    exit(1);
+  }
   // Bands of loops to tile.
   std::vector<SmallVector<AffineForOp, 6>> bands;
   getTileableBands(getOperation(), &bands);
