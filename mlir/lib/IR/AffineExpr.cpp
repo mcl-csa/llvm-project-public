@@ -18,6 +18,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include <numeric>
 #include <optional>
+#include "mlir/IR/Builders.h"
 
 using namespace mlir;
 using namespace mlir::detail;
@@ -1331,9 +1332,16 @@ void SimpleAffineExprFlattener::visitDivExpr(AffineBinaryOpExpr expr,
 
   // This is a pure affine expr; the RHS is a positive constant.
   int64_t rhsConst = rhs[getConstantIndex()];
+  //TODO: emit location of the operation
+    if(rhsConst <= 0)
+  {
+    Builder b = Builder(context);
+    emitError(b.getUnknownLoc(), "Illegal operation: RHS const operand to FloorDiv or CeilDiv cannot be less than or equal to zero. Aborted!");
+    exit(1);
+  }
   // TODO: handle division by zero at the same time the issue is
   // fixed at other places.
-  assert(rhsConst > 0 && "RHS constant has to be positive");
+  //assert(rhsConst > 0 && "RHS constant has to be positive");
 
   // Simplify the floordiv, ceildiv if possible by canceling out the greatest
   // common divisors of the numerator and denominator.
