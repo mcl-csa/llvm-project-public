@@ -19,7 +19,9 @@
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/Diagnostics.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include <optional>
@@ -139,6 +141,12 @@ LogicalResult LoopUnroll::runOnAffineForOp(AffineForOp forOp) {
   if (unrollFull)
     return loopUnrollFull(forOp);
   // Otherwise, unroll by the given unroll factor.
+  if(unrollFactor <= 0)
+  {
+    Builder b = Builder(getOperation()->getContext());
+    emitError(b.getUnknownLoc(), "'-affine-loop-unroll=unroll-factor' cannot be less than or equal to zero. LoopUnroll Pass Aborted!");
+    exit(1);
+  }
   if (unrollUpToFactor)
     return loopUnrollUpToFactor(forOp, unrollFactor);
   return loopUnrollByFactor(forOp, unrollFactor, /*annotateFn=*/nullptr,
