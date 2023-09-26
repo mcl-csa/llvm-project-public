@@ -23,6 +23,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/IntegerSet.h"
+#include "mlir/Support/LogicalResult.h"
 #include "mlir/Support/MathExtras.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/ADT/MapVector.h"
@@ -1016,8 +1017,14 @@ LogicalResult mlir::affine::loopUnrollByFactor(
     AffineForOp forOp, uint64_t unrollFactor,
     function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn,
     bool cleanUpUnroll) {
-  assert(unrollFactor > 0 && "unroll factor should be positive");
-
+  // assert(unrollFactor > 0 && "unroll factor should be positive");
+  if (unrollFactor <= 0) {
+    Builder b = Builder(forOp->getContext());
+    emitError(b.getUnknownLoc(),
+              "'-affine-loop-unroll=unroll-factor' cannot be less than or "
+              "equal to zero. LoopUnroll Pass Aborted!");
+    return failure();
+  }
   std::optional<uint64_t> mayBeConstantTripCount = getConstantTripCount(forOp);
   if (unrollFactor == 1) {
     if (mayBeConstantTripCount && *mayBeConstantTripCount == 1 &&
