@@ -12,6 +12,7 @@
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineExprVisitor.h"
 #include "mlir/IR/AffineMap.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/IntegerSet.h"
 #include "mlir/Support/MathExtras.h"
 #include "mlir/Support/TypeID.h"
@@ -1331,9 +1332,15 @@ void SimpleAffineExprFlattener::visitDivExpr(AffineBinaryOpExpr expr,
 
   // This is a pure affine expr; the RHS is a positive constant.
   int64_t rhsConst = rhs[getConstantIndex()];
-  // TODO: handle division by zero at the same time the issue is
-  // fixed at other places.
-  assert(rhsConst > 0 && "RHS constant has to be positive");
+  // TODO: emit location of the operation or print the expression
+  if (rhsConst <= 0) {
+    OpBuilder b = OpBuilder(context);
+    emitError(b.getUnknownLoc(),
+              "Illegal operation: RHS const operand to FloorDiv or CeilDiv "
+              "cannot be less than or equal to zero.\nAborted!\n");
+    exit(1);
+  }
+  // assert(rhsConst > 0 && "RHS constant has to be positive");
 
   // Simplify the floordiv, ceildiv if possible by canceling out the greatest
   // common divisors of the numerator and denominator.
