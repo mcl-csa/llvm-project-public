@@ -1017,13 +1017,11 @@ LogicalResult mlir::affine::loopUnrollByFactor(
     AffineForOp forOp, uint64_t unrollFactor,
     function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn,
     bool cleanUpUnroll) {
-  // assert(unrollFactor > 0 && "unroll factor should be positive");
   if (unrollFactor <= 0) {
-    Builder b = Builder(forOp->getContext());
-    emitError(b.getUnknownLoc(),
-              "'-affine-loop-unroll=unroll-factor' cannot be less than or "
-              "equal to zero. LoopUnroll Pass Aborted!");
-    return failure();
+    return emitError(
+        forOp.getLoc(),
+        "'-affine-loop-unroll=unroll-factor' cannot be less than or "
+        "equal to zero; pass aborted!");
   }
   std::optional<uint64_t> mayBeConstantTripCount = getConstantTripCount(forOp);
   if (unrollFactor == 1) {
