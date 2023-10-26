@@ -222,8 +222,14 @@ LogicalResult FlatAffineValueConstraints::addBound(BoundType type, unsigned pos,
   fullyComposeAffineMapAndOperands(&map, &operands);
   map = simplifyAffineMap(map);
   canonicalizeMapAndOperands(&map, &operands);
-  for (auto operand : operands)
+  for (auto operand : operands) {
+    if (!isTopLevelValue(operand) && !isAffineInductionVar(operand))
+      return emitError(operand.getLoc(),
+                       " value is neither a top-level value nor an "
+                       "affine IV; non-terminal symbol/loop IV expected; pass "
+                       "aborted!");
     addInductionVarOrTerminalSymbol(operand);
+  }
   return addBound(type, pos, computeAlignedMap(map, operands));
 }
 
