@@ -2505,6 +2505,8 @@ Value mlir::arith::getIdentityValue(AtomicRMWKind op, Type resultType,
                                     bool useOnlyFiniteValue) {
   auto attr =
       getIdentityValueAttr(op, resultType, builder, loc, useOnlyFiniteValue);
+  if (!attr)
+    return nullptr;
   return builder.create<arith::ConstantOp>(loc, attr);
 }
 
@@ -2525,10 +2527,6 @@ Value mlir::arith::getReductionOp(AtomicRMWKind op, OpBuilder &builder,
     return builder.create<arith::MaximumFOp>(loc, lhs, rhs);
   case AtomicRMWKind::minimumf:
     return builder.create<arith::MinimumFOp>(loc, lhs, rhs);
-   case AtomicRMWKind::maxnumf:
-    return builder.create<arith::MaxNumFOp>(loc, lhs, rhs);
-  case AtomicRMWKind::minnumf:
-    return builder.create<arith::MinNumFOp>(loc, lhs, rhs);
   case AtomicRMWKind::maxs:
     return builder.create<arith::MaxSIOp>(loc, lhs, rhs);
   case AtomicRMWKind::mins:

@@ -225,13 +225,13 @@ public:
       // initialization of the result values.
       Attribute reduction = std::get<0>(pair);
       Type resultType = std::get<1>(pair);
-      std::optional<arith::AtomicRMWKind> reductionOp =
-          arith::symbolizeAtomicRMWKind(
-              static_cast<uint64_t>(cast<IntegerAttr>(reduction).getInt()));
-      assert(reductionOp && "Reduction operation cannot be of None Type");
-      arith::AtomicRMWKind reductionOpValue = *reductionOp;
-      identityVals.push_back(
-          arith::getIdentityValue(reductionOpValue, resultType, rewriter, loc));
+      arith::AtomicRMWKind reductionOpValue = *(arith::symbolizeAtomicRMWKind(
+          static_cast<uint64_t>(cast<IntegerAttr>(reduction).getInt())));
+      auto reductionOp =
+          arith::getIdentityValue(reductionOpValue, resultType, rewriter, loc);
+      if (!reductionOp)
+        return failure();
+      identityVals.push_back(reductionOp);
     }
     parOp = rewriter.create<scf::ParallelOp>(
         loc, lowerBoundTuple, upperBoundTuple, steps, identityVals,
