@@ -94,7 +94,12 @@ void LoopUnroll::runOnOperation() {
   func::FuncOp func = getOperation();
   if (func.isExternal())
     return;
-
+  if (unrollFactor <= 0) {
+    emitError(func->getLoc(),
+              "'-affine-loop-unroll=unroll-factor' cannot be less than or "
+              "equal to zero; pass aborted!");
+    return signalPassFailure();
+  }
   if (unrollFull && unrollFullThreshold.hasValue()) {
     // Store short loops as we walk.
     SmallVector<AffineForOp, 4> loops;
