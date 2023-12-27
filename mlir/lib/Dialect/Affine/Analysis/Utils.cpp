@@ -1413,11 +1413,10 @@ unsigned mlir::affine::getInnermostCommonLoopDepth(
 /// 'loopDepth' between all dependent pairs of ops in 'opsA' and 'opsB', and
 /// then verifies if it is valid. Returns 'SliceComputationResult::Success' if
 /// union was computed correctly, an appropriate failure otherwise.
-SliceComputationResult
-mlir::affine::computeSliceUnion(ArrayRef<Operation *> opsA,
-                                ArrayRef<Operation *> opsB, unsigned loopDepth,
-                                unsigned numCommonLoops, bool isBackwardSlice,
-                                ComputationSliceState *sliceUnion) {
+SliceComputationResult mlir::affine::computeSliceUnion(
+    ArrayRef<Operation *> opsA, ArrayRef<Operation *> opsB, unsigned loopDepth,
+    unsigned numCommonLoops, bool isBackwardSlice, bool skipParallelismCheck,
+    ComputationSliceState *sliceUnion) {
   // Compute the union of slice bounds between all pairs in 'opsA' and
   // 'opsB' in 'sliceUnionCst'.
   FlatAffineValueConstraints sliceUnionCst;
@@ -1454,9 +1453,9 @@ mlir::affine::computeSliceUnion(ArrayRef<Operation *> opsA,
 
       // Compute slice bounds for 'srcAccess' and 'dstAccess'.
       ComputationSliceState tmpSliceState;
-      mlir::affine::getComputationSliceState(i, j, &dependenceConstraints,
-                                             loopDepth, isBackwardSlice,
-                                             &tmpSliceState);
+      mlir::affine::getComputationSliceState(
+          i, j, &dependenceConstraints, loopDepth, isBackwardSlice,
+          skipParallelismCheck, &tmpSliceState);
 
       if (sliceUnionCst.getNumDimAndSymbolVars() == 0) {
         // Initialize 'sliceUnionCst' with the bounds computed in previous step.
@@ -1653,7 +1652,8 @@ const char *const kSliceFusionBarrierAttrName = "slice_fusion_barrier";
 void mlir::affine::getComputationSliceState(
     Operation *depSourceOp, Operation *depSinkOp,
     FlatAffineValueConstraints *dependenceConstraints, unsigned loopDepth,
-    bool isBackwardSlice, ComputationSliceState *sliceState) {
+    bool isBackwardSlice, bool skipParallelismCheck,
+    ComputationSliceState *sliceState) {
   // Get loop nest surrounding src operation.
   SmallVector<AffineForOp, 4> srcLoopIVs;
   getAffineForIVs(*depSourceOp, &srcLoopIVs);
@@ -1740,9 +1740,15 @@ void mlir::affine::getComputationSliceState(
     //    1. Slice is  single trip count.
     //    2. Loop bounds of the source and destination match.
     //    3. Is being inserted at the innermost insertion point.
+    // If the skipParallelismCheck is set, then above 3 conditions are checked
+    // without checking if the loop is a reduction.
     std::optional<bool> isMaximal = sliceState->isMaximal();
-    if (isLoopParallelAndContainsReduction(getSliceLoop(i)) &&
-        isInnermostInsertion() && srcIsUnitSlice() && isMaximal && *isMaximal)
+    if (skipParallelismCheck) {
+      if (isInnermostInsertion() && srcIsUnitSlice() && isMaximal && *isMaximal)
+        continue;
+    } else if (isLoopParallelAndContainsReduction(getSliceLoop(i)) &&
+               isInnermostInsertion() && srcIsUnitSlice() && isMaximal &&
+               *isMaximal)
       continue;
     for (unsigned j = i; j < numSliceLoopIVs; ++j) {
       sliceState->lbs[j] = AffineMap();

@@ -1158,7 +1158,7 @@ public:
       SmallVector<ComputationSliceState, 8> depthSliceUnions;
       depthSliceUnions.resize(dstLoopDepthTest);
       unsigned maxLegalFusionDepth = 0;
-      FusionStrategy strategy(memref);
+      FusionStrategy strategy(memref, maximalFusion);
       for (unsigned i = 1; i <= dstLoopDepthTest; ++i) {
         FusionResult result =
             affine::canFuseLoops(sibAffineForOp, dstAffineForOp,

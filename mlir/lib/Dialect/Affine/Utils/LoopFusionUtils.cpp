@@ -339,7 +339,7 @@ FusionResult mlir::affine::canFuseLoops(AffineForOp srcForOp,
   // from 'forOpA' and 'forOpB'.
   SliceComputationResult sliceComputationResult = affine::computeSliceUnion(
       strategyOpsA, opsB, dstLoopDepth, numCommonLoops,
-      isSrcForOpBeforeDstForOp, srcSlice);
+      isSrcForOpBeforeDstForOp, fusionStrategy.isMaximalFusion(), srcSlice);
   if (sliceComputationResult.value == SliceComputationResult::GenericFailure) {
     LLVM_DEBUG(llvm::dbgs() << "computeSliceUnion failed\n");
     return FusionResult::FailPrecondition;

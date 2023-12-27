@@ -1,5 +1,6 @@
 // RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline='builtin.module(func.func(affine-loop-fusion{mode=producer}))' -split-input-file | FileCheck %s --check-prefix=PRODUCER-CONSUMER
 // RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline='builtin.module(func.func(affine-loop-fusion{fusion-maximal mode=sibling}))' -split-input-file | FileCheck %s --check-prefix=SIBLING-MAXIMAL
+// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline='builtin.module(func.func(affine-loop-fusion{fusion-maximal}))' -split-input-file | FileCheck %s --check-prefix=FUSION-MAXIMAL
 
 // Part I of fusion tests in  mlir/test/Transforms/loop-fusion.mlir.
 // Part II of fusion tests in mlir/test/Transforms/loop-fusion-2.mlir
@@ -224,5 +225,35 @@ func.func @fuse_higher_dim_nest_into_lower_dim_nest() {
   // PRODUCER-CONSUMER-NEXT:     affine.for %{{.*}} = 0 to 768
   // PRODUCER-CONSUMER-NOT:  affine.for
   // PRODUCER-CONSUMER:      return
+  return
+}
+
+// -----
+
+//  FUSION-MAXIMAL-LABEL: @should_fuse_without_nesting
+func.func @should_fuse_without_nesting(%input : memref<10xf32>, %output : memref<10xf32>, %reduc : memref<10xf32>) {
+  %one = arith.constant 1. : f32
+  affine.for %i = 0 to 10 {
+    %0 = affine.load %input[%i] : memref<10xf32>
+    %2 = arith.addf %0, %one : f32
+    affine.store %2, %output[%i] : memref<10xf32>
+  }
+  affine.for %j = 0 to 10 {
+    %0 = affine.load %input[%j] : memref<10xf32>
+    %1 = affine.load %reduc[0] : memref<10xf32>
+    %2 = arith.addf %0, %1 : f32
+    affine.store %0, %reduc[0] : memref<10xf32>
+  }
+  //Check that the maximal fusion happens without nesting of loops
+  //FUSION-MAXIMAL:         affine.for
+  //FUSION-MAXIMAL-NEXT:      affine.load
+  //FUSION-MAXIMAL-NEXT:      arith.addf
+  //FUSION-MAXIMAL-NEXT:      affine.store
+  //FUSION-MAXIMAL-NEXT:      affine.load
+  //FUSION-MAXIMAL-NEXT:      affine.load
+  //FUSION-MAXIMAL-NEXT:      arith.addf
+  //FUSION-MAXIMAL-NEXT:      affine.store
+  //FUSION-MAXIMAL-NEXT:     }
+  //FUSION-MAXIMAL:          return
   return
 }
