@@ -17,8 +17,6 @@
 #include "mlir/Dialect/Affine/Analysis/Utils.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/LoopUtils.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -166,22 +164,6 @@ static Operation *getFusedLoopNestInsertionPoint(AffineForOp srcForOp,
   // 'opB' insertion point.
   return forOpB;
 }
-// Checks if the for Op performs an operation with possible side effects.
-// Currentl assumption is, if there is a function call in this forOp , then it
-// can cause side-effects. Since both Producer-Consumer and Sibling Fusion are
-// based on common memref access, then pressence of a possible side-effecting
-// operation  should lead to a precondition failure for fusion.
-// TODO : add interprocedural side-effect analysis if requested
-static bool hasPossibleSideEffects(AffineForOp forOp) {
-  bool isSideEffect = false;
-  forOp.walk([&](Operation *op) {
-    if (isa<func::CallOp, LLVM::CallOp>(op)) {
-      isSideEffect = true;
-      return;
-    }
-  });
-  return isSideEffect;
-}
 
 // Gathers all load and store ops in loop nest rooted at 'forOp' into
 // 'loadAndStoreOps'.
@@ -293,13 +275,7 @@ FusionResult mlir::affine::canFuseLoops(AffineForOp srcForOp,
   // 'forOpA' executes before 'forOpB' in 'block'.
   auto forOpA = isSrcForOpBeforeDstForOp ? srcForOp : dstForOp;
   auto forOpB = isSrcForOpBeforeDstForOp ? dstForOp : srcForOp;
-  // Check if either of the loop has any possible side-effects.
-  // if yes then fusion precondition failed.
-  if (hasPossibleSideEffects(forOpA) || hasPossibleSideEffects(forOpB)) {
-    LLVM_DEBUG(llvm::dbgs() << "Atleast 1 of the loops performs an operation"
-                               "with probable side-effects\n");
-    return FusionResult::FailPrecondition;
-  }
+
   // Gather all load and store from 'forOpA' which precedes 'forOpB' in 'block'.
   SmallVector<Operation *, 4> opsA;
   if (!gatherLoadsAndStores(forOpA, opsA)) {
