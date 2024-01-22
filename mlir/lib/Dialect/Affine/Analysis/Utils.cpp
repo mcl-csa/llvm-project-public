@@ -50,6 +50,8 @@ void LoopNestStateCollector::collect(Operation *opToWalk) {
       loadOpInsts.push_back(op);
     else if (isa<AffineWriteOpInterface>(op))
       storeOpInsts.push_back(op);
+    else if (!mlir::isMemoryEffectFree(op))
+      memoryEffectOpInsts.push_back(op);
   });
 }
 
@@ -113,6 +115,8 @@ bool MemRefDependenceGraph::init() {
   // Map from a memref to the set of ids of the nodes that have ops accessing
   // the memref.
   DenseMap<Value, SetVector<unsigned>> memrefAccesses;
+  // Vector of nodes with possible memoryEffects in order of traversal
+  SmallVector<Node *> memoryEffectNodes;
 
   DenseMap<Operation *, unsigned> forToNodeMap;
   for (Operation &op : block) {
@@ -129,13 +133,24 @@ bool MemRefDependenceGraph::init() {
       for (auto *opInst : collector.loadOpInsts) {
         node.loads.push_back(opInst);
         auto memref = cast<AffineReadOpInterface>(opInst).getMemRef();
+        if (memrefAccesses.find(memref) == memrefAccesses.end()) {
+          for (auto *n : memoryEffectNodes)
+            memrefAccesses[memref].insert(n->id);
+        }
         memrefAccesses[memref].insert(node.id);
       }
       for (auto *opInst : collector.storeOpInsts) {
         node.stores.push_back(opInst);
         auto memref = cast<AffineWriteOpInterface>(opInst).getMemRef();
+        if (memrefAccesses.find(memref) == memrefAccesses.end()) {
+          for (auto *n : memoryEffectNodes)
+            memrefAccesses[memref].insert(n->id);
+        }
         memrefAccesses[memref].insert(node.id);
       }
+      node.memEffects = collector.memoryEffectOpInsts;
+      if (!node.memEffects.empty())
+        memoryEffectNodes.push_back(&node);
       forToNodeMap[&op] = node.id;
       nodes.insert({node.id, node});
     } else if (dyn_cast<AffineReadOpInterface>(op)) {
@@ -218,12 +233,14 @@ bool MemRefDependenceGraph::init() {
     unsigned n = memrefAndList.second.size();
     for (unsigned i = 0; i < n; ++i) {
       unsigned srcId = memrefAndList.second[i];
-      bool srcHasStore =
-          getNode(srcId)->getStoreOpCount(memrefAndList.first) > 0;
+      Node *srcNode = getNode(srcId);
+      bool srcHasStore = (!srcNode->memEffects.empty()) ||
+                         (srcNode->getStoreOpCount(memrefAndList.first) > 0);
       for (unsigned j = i + 1; j < n; ++j) {
         unsigned dstId = memrefAndList.second[j];
-        bool dstHasStore =
-            getNode(dstId)->getStoreOpCount(memrefAndList.first) > 0;
+        Node *dstNode = getNode(dstId);
+        bool dstHasStore = (!dstNode->memEffects.empty()) ||
+                           (dstNode->getStoreOpCount(memrefAndList.first) > 0);
         if (srcHasStore || dstHasStore)
           addEdge(srcId, dstId, memrefAndList.first);
       }

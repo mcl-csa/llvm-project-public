@@ -226,3 +226,29 @@ func.func @fuse_higher_dim_nest_into_lower_dim_nest() {
   // PRODUCER-CONSUMER:      return
   return
 }
+
+// -----
+
+// FUSION-MAXIMAL-LABEL: func @should_not_fuse_loops_with_side_effects
+func.func @should_not_fuse_loops_with_side_effects() {
+  %arg0=memref.alloc(): memref<10xf32>
+    affine.for %i = 0 to 10 {
+      %0 = affine.load %arg0[%i] : memref<10xf32>
+      "bar"():()->()
+    }
+    affine.for %j = 0 to 10 {
+      %0 = affine.load %arg0[%j] : memref<10xf32>
+     "foo"():()->()
+    }
+  // Should not fuse loops with side-effects.
+  // FUSION-MAXIMAL:      affine.for %{{.*}} = 0 to 10
+  // FUSION-MAXIMAL-NEXT:   affine.load 
+  // FUSION-MAXIMAL-NEXT:   "boo"
+  // FUSION-MAXIMAL-NEXT: }
+  // FUSION-MAXIMAL-NEXT: affine.for %{{.*}} = 0 to 10
+  // FUSION-MAXIMAL-NEXT:   affine.load 
+  // FUSION-MAXIMAL-NEXT:   "foo"
+  // FUSION-MAXIMAL-NEXT: }
+  // FUSION-MAXIMAL:       return
+    return
+  }
