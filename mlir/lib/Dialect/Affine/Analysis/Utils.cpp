@@ -50,6 +50,27 @@ void LoopNestStateCollector::collect(Operation *opToWalk) {
       loadOpInsts.push_back(op);
     else if (isa<AffineWriteOpInterface>(op))
       storeOpInsts.push_back(op);
+    else {
+      // Checking to see if op has alloc or dealloc effect.
+      auto hasNoAllocOrFreeEffect = [op]() -> bool {
+        if (auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op)) {
+          SmallVector<MemoryEffects::EffectInstance, 1> effects;
+          effectInterface.getEffects(effects);
+          // if any of the effects of this op are alloc or free type then
+          // return false.
+          return !llvm::any_of(
+              effects, [](const MemoryEffects::EffectInstance &it) -> bool {
+                return isa<MemoryEffects::Allocate, MemoryEffects::Free>(
+                    it.getEffect());
+              });
+        }
+        return true;
+      };
+      // TODO: Add handling of alloc/dealloc ops in MDG construction.
+      // Current version filters them out.
+      if (!mlir::isMemoryEffectFree(op) && hasNoAllocOrFreeEffect())
+        memoryEffectOpInsts.push_back(op);
+    }
   });
 }
 
@@ -113,6 +134,8 @@ bool MemRefDependenceGraph::init() {
   // Map from a memref to the set of ids of the nodes that have ops accessing
   // the memref.
   DenseMap<Value, SetVector<unsigned>> memrefAccesses;
+  // Vector of nodes with possible memoryEffects in order of traversal.
+  SmallVector<Node *> memoryEffectNodes;
 
   DenseMap<Operation *, unsigned> forToNodeMap;
   for (Operation &op : block) {
@@ -129,13 +152,24 @@ bool MemRefDependenceGraph::init() {
       for (auto *opInst : collector.loadOpInsts) {
         node.loads.push_back(opInst);
         auto memref = cast<AffineReadOpInterface>(opInst).getMemRef();
+        if (llvm::is_contained(memrefAccesses, memref)) {
+          for (auto *n : memoryEffectNodes)
+            memrefAccesses[memref].insert(n->id);
+        }
         memrefAccesses[memref].insert(node.id);
       }
       for (auto *opInst : collector.storeOpInsts) {
         node.stores.push_back(opInst);
         auto memref = cast<AffineWriteOpInterface>(opInst).getMemRef();
+        if (llvm::is_contained(memrefAccesses, memref)) {
+          for (auto *n : memoryEffectNodes)
+            memrefAccesses[memref].insert(n->id);
+        }
         memrefAccesses[memref].insert(node.id);
       }
+      node.memEffects = collector.memoryEffectOpInsts;
+      if (!node.memEffects.empty())
+        memoryEffectNodes.push_back(&node);
       forToNodeMap[&op] = node.id;
       nodes.insert({node.id, node});
     } else if (dyn_cast<AffineReadOpInterface>(op)) {
@@ -214,17 +248,23 @@ bool MemRefDependenceGraph::init() {
   }
 
   // Walk memref access lists and add graph edges between dependent nodes.
+  // add edge between nodes accessing memrefs where atleast one of them has a
+  // write op or has a potential side-effect op.
   for (auto &memrefAndList : memrefAccesses) {
     unsigned n = memrefAndList.second.size();
     for (unsigned i = 0; i < n; ++i) {
       unsigned srcId = memrefAndList.second[i];
-      bool srcHasStore =
-          getNode(srcId)->getStoreOpCount(memrefAndList.first) > 0;
+      Node *srcNode = getNode(srcId);
+      bool srcMayHaveMemEffOrStore =
+          !srcNode->memEffects.empty() ||
+          srcNode->getStoreOpCount(memrefAndList.first) > 0;
       for (unsigned j = i + 1; j < n; ++j) {
         unsigned dstId = memrefAndList.second[j];
-        bool dstHasStore =
-            getNode(dstId)->getStoreOpCount(memrefAndList.first) > 0;
-        if (srcHasStore || dstHasStore)
+        Node *dstNode = getNode(dstId);
+        bool dstMayHaveMemEffOrStore =
+            !dstNode->memEffects.empty() ||
+            dstNode->getStoreOpCount(memrefAndList.first) > 0;
+        if (srcMayHaveMemEffOrStore || dstMayHaveMemEffOrStore)
           addEdge(srcId, dstId, memrefAndList.first);
       }
     }

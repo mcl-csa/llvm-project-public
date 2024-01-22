@@ -39,6 +39,9 @@ struct LoopNestStateCollector {
   SmallVector<AffineForOp, 4> forOps;
   SmallVector<Operation *, 4> loadOpInsts;
   SmallVector<Operation *, 4> storeOpInsts;
+  // Collection of possible memory side-effecting ops, other than the ops
+  // already accounted for like load/store/alloc/free.
+  SmallVector<Operation *, 4> memoryEffectOpInsts;
   bool hasNonAffineRegionOp = false;
 
   // Collects load and store operations, and whether or not a region holding op
@@ -65,7 +68,8 @@ public:
     SmallVector<Operation *, 4> loads;
     // List of store op insts.
     SmallVector<Operation *, 4> stores;
-
+    // List of memory effect op insts other than the ones already accounted for.
+    SmallVector<Operation *, 4> memEffects;
     Node(unsigned id, Operation *op) : id(id), op(op) {}
 
     // Returns the load op count for 'memref'.
