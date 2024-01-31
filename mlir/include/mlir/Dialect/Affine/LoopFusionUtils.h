@@ -79,11 +79,13 @@ public:
 
   /// Construct a sibling fusion strategy targeting 'memref'. This construct
   /// should only be used for sibling fusion.
-  FusionStrategy(Value memref) : strategy(Sibling), memref(memref) {}
+  FusionStrategy(Value memref, bool maximalFusion)
+      : strategy(Sibling), maximalFusion(maximalFusion), memref(memref) {}
 
   /// Returns the fusion strategy.
   StrategyEnum getStrategy() const { return strategy; };
-
+  /// Return the Fusion Maximal state.
+  bool isMaximalFusion() const { return maximalFusion; };
   /// Returns the memref attached to this sibling fusion strategy.
   Value getSiblingFusionMemRef() const {
     assert(strategy == Sibling && "Memref is only valid for sibling fusion");
@@ -93,6 +95,8 @@ public:
 private:
   /// Fusion strategy.
   StrategyEnum strategy;
+  /// Maximal Fusion.
+  bool maximalFusion;
 
   /// Target memref for this fusion transformation. Only used for sibling
   /// fusion.

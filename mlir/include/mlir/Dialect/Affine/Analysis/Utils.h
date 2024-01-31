@@ -336,6 +336,10 @@ private:
 /// of loop IVs and symbols of the loop nest surrounding 'depSourceAccess' at
 /// 'loopDepth'.
 /// The slice loop bounds and associated operands are returned in 'sliceState'.
+/// If skipParallelismCheck is true, then skip the parallelism check on sibling
+/// loop. This flag will be set in cases like fusion-maximal, that must fuse if
+/// fusion is possible between a sequential and a parallel loop, where this
+/// heuristic can be ignored.
 //
 //  Backward slice example:
 //
@@ -368,6 +372,7 @@ private:
 void getComputationSliceState(Operation *depSourceOp, Operation *depSinkOp,
                               FlatAffineValueConstraints *dependenceConstraints,
                               unsigned loopDepth, bool isBackwardSlice,
+                              bool skipParallelismCheck,
                               ComputationSliceState *sliceState);
 
 /// Return the number of iterations for the `slicetripCountMap` provided.
@@ -396,7 +401,8 @@ bool buildSliceTripCountMap(
 SliceComputationResult
 computeSliceUnion(ArrayRef<Operation *> opsA, ArrayRef<Operation *> opsB,
                   unsigned loopDepth, unsigned numCommonLoops,
-                  bool isBackwardSlice, ComputationSliceState *sliceUnion);
+                  bool isBackwardSlice, bool skipParallelismCheck,
+                  ComputationSliceState *sliceUnion);
 
 /// Creates a clone of the computation contained in the loop nest surrounding
 /// 'srcOpInst', slices the iteration space of src loop based on slice bounds
