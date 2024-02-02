@@ -1,5 +1,6 @@
 // RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline='builtin.module(func.func(affine-loop-fusion{mode=producer}))' -split-input-file | FileCheck %s --check-prefix=PRODUCER-CONSUMER
 // RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline='builtin.module(func.func(affine-loop-fusion{fusion-maximal mode=sibling}))' -split-input-file | FileCheck %s --check-prefix=SIBLING-MAXIMAL
+// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline='builtin.module(func.func(affine-loop-fusion{fusion-maximal}))' -split-input-file | FileCheck %s --check-prefix=FUSION-MAXIMAL
 
 // Part I of fusion tests in  mlir/test/Transforms/loop-fusion.mlir.
 // Part II of fusion tests in mlir/test/Transforms/loop-fusion-2.mlir
@@ -226,3 +227,29 @@ func.func @fuse_higher_dim_nest_into_lower_dim_nest() {
   // PRODUCER-CONSUMER:      return
   return
 }
+
+// -----
+
+// FUSION-MAXIMAL-LABEL: func @should_not_fuse_loops_with_side_effects
+func.func @should_not_fuse_loops_with_side_effects() {
+  %arg0=memref.alloc(): memref<10xf32>
+    affine.for %i = 0 to 10 {
+      %0 = affine.load %arg0[%i] : memref<10xf32>
+      "bar"():()->()
+    }
+    affine.for %j = 0 to 10 {
+      %0 = affine.load %arg0[%j] : memref<10xf32>
+     "foo"():()->()
+    }
+  // Should not fuse loops with side-effects.
+  // FUSION-MAXIMAL:      affine.for %{{.*}} = 0 to 10
+  // FUSION-MAXIMAL-NEXT:   affine.load 
+  // FUSION-MAXIMAL-NEXT:   "bar"
+  // FUSION-MAXIMAL-NEXT: }
+  // FUSION-MAXIMAL-NEXT: affine.for %{{.*}} = 0 to 10
+  // FUSION-MAXIMAL-NEXT:   affine.load 
+  // FUSION-MAXIMAL-NEXT:   "foo"
+  // FUSION-MAXIMAL-NEXT: }
+  // FUSION-MAXIMAL:       return
+    return
+  }
